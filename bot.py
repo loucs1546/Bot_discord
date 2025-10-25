@@ -5,21 +5,20 @@ import asyncio
 import json
 from dotenv import load_dotenv
 
-# === CONFIG ===
+# === CONFIGURATION ===
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN non trouvé.")
+    raise ValueError("❌ DISCORD_TOKEN non trouvé. Vérifie les Variables Railway.")
 
-# Fichier pour stocker les salons activés
+# Fichier pour stocker les salons activés par serveur
 ACTIVATED_FILE = "activated_channels.json"
 
-# Charger les salons activés
 def load_activated_channels():
     if os.path.exists(ACTIVATED_FILE):
         with open(ACTIVATED_FILE, "r", encoding="utf-8") as f:
             return {int(k): int(v) for k, v in json.load(f).items()}
-    return {}  # {guild_id: channel_id}
+    return {}
 
 def save_activated_channels(data):
     with open(ACTIVATED_FILE, "w", encoding="utf-8") as f:
@@ -37,7 +36,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # === COMMANDE SLASH : /active webhook-tickets ===
 @bot.tree.command(name="active", description="Active le système de tickets par webhook dans ce salon")
 async def activate_webhook_tickets(interaction: discord.Interaction):
-    # Vérifier que l'utilisateur est staff
+    # Vérifier que l'utilisateur a un rôle staff
     staff_role = None
     for name in ["Staff", "Support", "Modérateur", "Mod", "staff", "support", "Équipe ZENTYS"]:
         role = discord.utils.get(interaction.guild.roles, name=name)
@@ -49,12 +48,14 @@ async def activate_webhook_tickets(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
         return
 
-    # Activer dans ce salon
     activated_channels[interaction.guild.id] = interaction.channel.id
     save_activated_channels(activated_channels)
-    await interaction.response.send_message("✅ Système de tickets activé dans ce salon !\nTous les messages de webhook seront convertis en tickets.", ephemeral=True)
+    await interaction.response.send_message(
+        "✅ Système de tickets activé dans ce salon !\nTous les messages de webhook seront convertis en tickets.",
+        ephemeral=True
+    )
 
-# === VUE DES BOUTONS DANS LE TICKET ===
+# === BOUTONS INTERACTIFS DANS LE TICKET ===
 class TicketView(discord.ui.View):
     def __init__(self, user_id, staff_role_id):
         super().__init__(timeout=None)
@@ -109,13 +110,14 @@ class TicketView(discord.ui.View):
         await asyncio.sleep(3)
         await interaction.channel.delete()
 
-# === CRÉATION DU TICKET ===
+# === CRÉATION DU TICKET À PARTIR D'UN WEBHOOK ===
 async def create_ticket_from_webhook(message):
-    embed = message.embeds[0] if message.embeds else None
-    if not embed:
+    if not message.embeds:
         return
 
+    embed = message.embeds[0]
     guild = message.guild
+
     fields = {field.name: field.value for field in embed.fields}
     full_name = fields.get("👤 Nom complet", "Inconnu")
     discord_tag = fields.get("💬 Discord", "Non spécifié")
@@ -139,22 +141,24 @@ async def create_ticket_from_webhook(message):
         await message.channel.send("❌ Rôle 'Staff' introuvable.")
         return
 
-    # Chercher l'utilisateur
+    # Chercher l'utilisateur dans le serveur
     member_to_add = None
     discord_tag_clean = discord_tag.strip()
+
     if discord_tag_clean.startswith('<@') and discord_tag_clean.endswith('>'):
         try:
             user_id = int(discord_tag_clean[2:-1].replace('!', ''))
             member_to_add = guild.get_member(user_id)
         except ValueError:
             pass
+
     if not member_to_add:
         for member in guild.members:
             if member.name == discord_tag_clean or str(member) == discord_tag_clean:
                 member_to_add = member
                 break
 
-    # Permissions
+    # Permissions du salon
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -165,6 +169,7 @@ async def create_ticket_from_webhook(message):
 
     try:
         channel = await guild.create_text_channel(channel_name, overwrites=overwrites)
+
         embed_response = discord.Embed(
             title="📩 Nouveau ticket",
             color=0x00ffff,
@@ -191,21 +196,25 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Vérifier si c'est un webhook DANS un salon activé
+    # Réagir à TOUS les webhooks dans les salons activés
     if message.webhook_id is not None:
         if message.guild.id in activated_channels:
             if message.channel.id == activated_channels[message.guild.id]:
-                if message.embeds:
-                    await create_ticket_from_webhook(message)
-                    return
+                await create_ticket_from_webhook(message)
+                return
 
     await bot.process_commands(message)
 
-# === SYNCHRONISER LES COMMANDES SLASH ===
+# === SYNCHRONISATION SUR TON SERVEUR (ID: 1084544847551148162) ===
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user} est en ligne !")
-    await bot.tree.sync()  # Synchronise les commandes slash
+    # 🔴 Synchronisation INSTANTANÉE sur ton serveur de test
+    GUILD_ID = 1084544847551148162
+    guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
+    await bot.tree.sync(guild=guild)
+    print("✅ Commandes slash synchronisées pour ton serveur.")
 
 # === LANCEMENT ===
 bot.run(TOKEN)
