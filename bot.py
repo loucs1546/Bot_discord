@@ -20,10 +20,19 @@ GOODBYE_FILE = "goodbye_channels.json"
 LOGS_FILE = "logs_channels.json"
 
 def load_json(file):
-    if os.path.exists(file):
+    if not os.path.exists(file):
+        return {}
+    try:
         with open(file, "r", encoding="utf-8") as f:
-            return {int(k): int(v) for k, v in json.load(f).items()}
-    return {}
+            data = json.load(f)
+            if isinstance(data, dict):
+                return {int(k): int(v) for k, v in data.items() if str(k).isdigit() and str(v).isdigit()}
+            else:
+                print(f"⚠️ {file} n'est pas un dictionnaire JSON valide. Réinitialisation.")
+                return {}
+    except (json.JSONDecodeError, ValueError, OSError) as e:
+        print(f"⚠️ Erreur de lecture de {file} : {e}. Réinitialisation.")
+        return {}
 
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
@@ -340,3 +349,4 @@ async def on_ready():
     print("✅ Commandes slash synchronisées.")
 
 bot.run(TOKEN)
+
