@@ -1,4 +1,7 @@
 .env
 activated_channels.json
+welcome_channels.json
+goodbye_channels.json
+logs_channels.json
 __pycache__/
 *.pyc
