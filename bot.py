@@ -66,14 +66,19 @@ async def handle_ticket_embed(message):
         channel = await guild.create_text_channel(channel_name, overwrites=overwrites)
 
         # Envoyer le message d'accueil
-        await channel.send(
-            f"📩 **Nouveau ticket**\n"
-            f"**Utilisateur :** {full_name} (`{discord_tag}`)\n"
-            f"**Raison :** {reason}\n"
-            f"**Disponibilité :** {availability}\n"
-            f"**Détails :**\n{details}\n\n"
-            f"🔔 Un membre du <@&{staff_role.id}> va vous répondre rapidement."
+        embed_response = discord.Embed(
+            title="📩 Nouveau ticket",
+            color=0x00ffff,
+            timestamp=discord.utils.utcnow()
         )
+        embed_response.add_field(name="👤 Nom complet", value=full_name, inline=True)
+        embed_response.add_field(name="💬 Discord", value=discord_tag, inline=True)
+        embed_response.add_field(name="🕒 Disponibilité", value=availability, inline=False)
+        embed_response.add_field(name="📄 Détails", value=details, inline=False)
+        embed_response.set_footer(text="ZENTYS - Système de tickets")
+        embed_response.description = f"**Raison :** {reason}\n\n🔔 Un membre du <@&{staff_role.id}> va vous répondre rapidement."
+
+        await channel.send(embed=embed_response)
 
         # Confirmation dans le salon source (optionnel)
         await message.channel.send(f"✅ Ticket créé : {channel.mention}")
@@ -108,3 +113,4 @@ async def close(ctx):
 
 # Lancer le bot
 bot.run(TOKEN)
+
