@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 
-# === CONFIG ===
+# === CONFIGURATION ===
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
@@ -19,6 +19,7 @@ WELCOME_FILE = "welcome_channels.json"
 GOODBYE_FILE = "goodbye_channels.json"
 LOGS_FILE = "logs_channels.json"
 
+# === FONCTIONS DE GESTION JSON SÉCURISÉES ===
 def load_json(file):
     if not os.path.exists(file):
         return {}
@@ -28,7 +29,7 @@ def load_json(file):
             if isinstance(data, dict):
                 return {int(k): int(v) for k, v in data.items() if str(k).isdigit() and str(v).isdigit()}
             else:
-                print(f"⚠️ {file} n'est pas un dictionnaire JSON valide. Réinitialisation.")
+                print(f"⚠️ {file} n'est pas un dictionnaire. Réinitialisation.")
                 return {}
     except (json.JSONDecodeError, ValueError, OSError) as e:
         print(f"⚠️ Erreur de lecture de {file} : {e}. Réinitialisation.")
@@ -44,7 +45,7 @@ goodbye_channels = load_json(GOODBYE_FILE)
 logs_channels = load_json(LOGS_FILE)
 
 # === BOT SETUP ===
-intents = discord.Intents.all()  # Nécessaire pour les logs complets
+intents = discord.Intents.all()
 intents.message_content = True
 intents.members = True
 
@@ -56,7 +57,7 @@ STAFF_ROLES = ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"]
 def is_staff(member):
     return any(role.name in STAFF_ROLES for role in member.roles)
 
-# === COMMANDE : /active ===
+# === COMMANDES SLASH ===
 @bot.tree.command(name="active", description="Active le système de tickets par webhook dans ce salon")
 async def activate_webhook_tickets(interaction: discord.Interaction):
     if not is_staff(interaction.user):
@@ -66,7 +67,6 @@ async def activate_webhook_tickets(interaction: discord.Interaction):
     save_json(ACTIVATED_FILE, activated_channels)
     await interaction.response.send_message("✅ Système de tickets activé dans ce salon !", ephemeral=True)
 
-# === COMMANDE : /rajout @Utilisateur ===
 @bot.tree.command(name="rajout", description="Ajoute un membre au salon actuel")
 @app_commands.describe(membre="Le membre à ajouter")
 async def rajout(interaction: discord.Interaction, membre: discord.Member):
@@ -76,7 +76,6 @@ async def rajout(interaction: discord.Interaction, membre: discord.Member):
     await interaction.channel.set_permissions(membre, read_messages=True, send_messages=True)
     await interaction.response.send_message(f"✅ {membre.mention} a été ajouté au salon.")
 
-# === COMMANDE : /retire @Utilisateur ===
 @bot.tree.command(name="retire", description="Retire un membre du salon actuel (lecture + écriture)")
 @app_commands.describe(membre="Le membre à retirer")
 async def retire(interaction: discord.Interaction, membre: discord.Member):
@@ -86,27 +85,31 @@ async def retire(interaction: discord.Interaction, membre: discord.Member):
     await interaction.channel.set_permissions(membre, read_messages=False, send_messages=False)
     await interaction.response.send_message(f"✅ {membre.mention} a été retiré du salon.")
 
-# === COMMANDE : /messageoff @Utilisateur ===
 @bot.tree.command(name="messageoff", description="Empêche un membre d'envoyer des messages (il reste dans le salon)")
 @app_commands.describe(membre="Le membre à restreindre")
 async def messageoff(interaction: discord.Interaction, membre: discord.Member):
     if not is_staff(interaction.user):
         await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
         return
-    await interaction.channel.set_permissions(membre, send_messages=False)
-    await interaction.response.send_message(f"🔇 {membre.mention} ne peut plus envoyer de messages ici.")
+    perms = interaction.channel.overwrites_for(membre)
+    perms.send_messages = False
+    perms.read_messages = True
+    await interaction.channel.set_permissions(membre, overwrite=perms)
+    await interaction.response.send_message(f"🔇 {membre.mention} ne peut plus envoyer de messages ici.", ephemeral=True)
 
-# === COMMANDE : /urloff @Utilisateur ===
-@bot.tree.command(name="urloff", description="Bloque les liens/images pour un membre")
+@bot.tree.command(name="urloff", description="Bloque les liens/images pour un membre (il reste dans le salon)")
 @app_commands.describe(membre="Le membre à restreindre")
 async def urloff(interaction: discord.Interaction, membre: discord.Member):
     if not is_staff(interaction.user):
         await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
         return
-    await interaction.channel.set_permissions(membre, attach_files=False, embed_links=False)
-    await interaction.response.send_message(f"🔗 {membre.mention} ne peut plus envoyer de liens ou d'images ici.")
+    perms = interaction.channel.overwrites_for(membre)
+    perms.attach_files = False
+    perms.embed_links = False
+    perms.read_messages = True
+    await interaction.channel.set_permissions(membre, overwrite=perms)
+    await interaction.response.send_message(f"🔗 {membre.mention} ne peut plus envoyer de liens ou d'images ici.", ephemeral=True)
 
-# === COMMANDE : /welcome-salon ===
 @bot.tree.command(name="welcome-salon", description="Définir ce salon comme salon de bienvenue")
 async def welcome_salon(interaction: discord.Interaction):
     if not is_staff(interaction.user):
@@ -116,7 +119,6 @@ async def welcome_salon(interaction: discord.Interaction):
     save_json(WELCOME_FILE, welcome_channels)
     await interaction.response.send_message("✅ Salon de bienvenue configuré !", ephemeral=True)
 
-# === COMMANDE : /bye-salon ===
 @bot.tree.command(name="bye-salon", description="Définir ce salon comme salon d'au revoir")
 async def bye_salon(interaction: discord.Interaction):
     if not is_staff(interaction.user):
@@ -126,7 +128,6 @@ async def bye_salon(interaction: discord.Interaction):
     save_json(GOODBYE_FILE, goodbye_channels)
     await interaction.response.send_message("✅ Salon d'au revoir configuré !", ephemeral=True)
 
-# === COMMANDE : /logs-salon ===
 @bot.tree.command(name="logs-salon", description="Définir ce salon comme salon de logs")
 async def logs_salon(interaction: discord.Interaction):
     if not is_staff(interaction.user):
@@ -136,7 +137,6 @@ async def logs_salon(interaction: discord.Interaction):
     save_json(LOGS_FILE, logs_channels)
     await interaction.response.send_message("✅ Salon de logs configuré !", ephemeral=True)
 
-# === COMMANDE : /message #salon ===
 @bot.tree.command(name="message", description="Envoie un message anonyme dans un salon (staff uniquement)")
 @app_commands.describe(salon="Le salon cible", contenu="Le message à envoyer")
 async def message_command(interaction: discord.Interaction, salon: discord.TextChannel, contenu: str):
@@ -179,7 +179,7 @@ class TicketView(discord.ui.View):
             button.style = discord.ButtonStyle.gray
             self.paused = False
         else:
-            await channel.set_permissions(member, send_messages=False)  # ✅ Ne retire PAS la lecture
+            await channel.set_permissions(member, send_messages=False)
             button.label = "▶️ Reprendre"
             button.style = discord.ButtonStyle.green
             self.paused = True
@@ -291,20 +291,50 @@ async def on_message(message):
                 return
     await bot.process_commands(message)
 
-# === BIENVENUE / AU REVOIR ===
+# === MESSAGES D'ARRIVÉE/DÉPART STYLÉS ===
+async def send_welcome_message(guild, channel, member):
+    webhooks = await channel.webhooks()
+    webhook = next((wh for wh in webhooks if wh.name == "ZENTYS - Bienvenue"), None)
+    if not webhook:
+        webhook = await channel.create_webhook(name="ZENTYS - Bienvenue")
+
+    embed = discord.Embed(
+        description=f"🎉 **Bienvenue {member.mention} !**\n\nTu es le **{guild.member_count}ᵉ** membre de **{guild.name}** !",
+        color=0x00ffaa,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="ZENTYS • Organisation Criminelle", icon_url=guild.icon.url if guild.icon else None)
+    await webhook.send(embed=embed, username="ZENTYS", avatar_url="https://i.imgur.com/0XJzVlP.png")
+
+async def send_goodbye_message(guild, channel, member):
+    webhooks = await channel.webhooks()
+    webhook = next((wh for wh in webhooks if wh.name == "ZENTYS - Au revoir"), None)
+    if not webhook:
+        webhook = await channel.create_webhook(name="ZENTYS - Au revoir")
+
+    embed = discord.Embed(
+        description=f"👋 **{member.name}#{member.discriminator}** a quitté le serveur.",
+        color=0xff5555,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="ZENTYS • Organisation Criminelle")
+    await webhook.send(embed=embed, username="ZENTYS", avatar_url="https://i.imgur.com/0XJzVlP.png")
+
 @bot.event
 async def on_member_join(member):
     if member.guild.id in welcome_channels:
         channel = member.guild.get_channel(welcome_channels[member.guild.id])
         if channel:
-            await channel.send(f"🎉 Bienvenue {member.mention} sur **{member.guild.name}** !")
+            await send_welcome_message(member.guild, channel, member)
 
 @bot.event
 async def on_member_remove(member):
     if member.guild.id in goodbye_channels:
         channel = member.guild.get_channel(goodbye_channels[member.guild.id])
         if channel:
-            await channel.send(f"👋 {member.name}#{member.discriminator} a quitté le serveur.")
+            await send_goodbye_message(member.guild, channel, member)
 
 # === SYSTÈME DE LOGS COMPLET ===
 async def send_log(guild, content):
@@ -338,15 +368,14 @@ async def on_member_update(before, after):
     if before.nick != after.nick:
         await send_log(after.guild, f"📛 {before.mention} a changé de pseudo : `{before.nick or before.name}` → `{after.nick or after.name}`")
 
-# === SYNCHRONISATION SUR TON SERVEUR ===
+# === SYNCHRONISATION SUR TON NOUVEAU SERVEUR ===
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user} est en ligne !")
-    GUILD_ID = 1289495334069862452
+    GUILD_ID = 1289495334069862452  # ✅ Nouvel ID
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
-    print("✅ Commandes slash synchronisées.")
+    print("✅ Commandes slash synchronisées pour ton serveur.")
 
 bot.run(TOKEN)
-
