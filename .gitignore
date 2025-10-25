@@ -1,4 +1,4 @@
 .env
+activated_channels.json
 __pycache__/
 *.pyc
-.DS_Store
