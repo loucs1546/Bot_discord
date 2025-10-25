@@ -1,15 +1,16 @@
 import discord
 from discord.ext import commands
+from discord import app_commands  # ✅ Import ajouté
 import os
 import asyncio
 import json
 from dotenv import load_dotenv
 
-# === CONFIG ===
+# === CONFIGURATION ===
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN non trouvé.")
+    raise ValueError("❌ DISCORD_TOKEN non trouvé. Vérifie les Variables Railway.")
 
 ACTIVATED_FILE = "activated_channels.json"
 
@@ -48,10 +49,7 @@ async def activate_webhook_tickets(interaction: discord.Interaction):
 
     activated_channels[interaction.guild.id] = interaction.channel.id
     save_activated_channels(activated_channels)
-    await interaction.response.send_message(
-        "✅ Système de tickets activé dans ce salon !",
-        ephemeral=True
-    )
+    await interaction.response.send_message("✅ Système de tickets activé dans ce salon !", ephemeral=True)
 
 # === COMMANDE : /ajout @Utilisateur ===
 @bot.tree.command(name="ajout", description="Ajoute un membre au salon actuel")
@@ -123,13 +121,11 @@ class TicketView(discord.ui.View):
             return
 
         if self.paused:
-            # Reprendre : réactiver l'envoi de messages
             await channel.set_permissions(member, send_messages=True)
             button.label = "⏸️ Mettre en pause"
             button.style = discord.ButtonStyle.gray
             self.paused = False
         else:
-            # Mettre en pause : désactiver l'envoi, mais garder la lecture
             await channel.set_permissions(member, send_messages=False)
             button.label = "▶️ Reprendre"
             button.style = discord.ButtonStyle.green
@@ -156,7 +152,7 @@ class TicketView(discord.ui.View):
         await asyncio.sleep(3)
         await interaction.channel.delete()
 
-# === CRÉATION DU TICKET ===
+# === CRÉATION DU TICKET À PARTIR D'UN WEBHOOK ===
 async def create_ticket_from_webhook(message):
     if not message.embeds:
         return
@@ -210,6 +206,7 @@ async def create_ticket_from_webhook(message):
 
     try:
         channel = await guild.create_text_channel(channel_name, overwrites=overwrites)
+
         embed_response = discord.Embed(
             title="📩 Nouveau ticket",
             color=0x00ffff,
@@ -242,14 +239,15 @@ async def on_message(message):
                 return
     await bot.process_commands(message)
 
-# === SYNCHRONISATION SUR TON SERVEUR ===
+# === SYNCHRONISATION SUR TON SERVEUR (ID: 1084544847551148162) ===
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user} est en ligne !")
-    GUILD_ID = 1084544847551148162
+    GUILD_ID = 1289495334069862452
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
-    print("✅ Commandes slash synchronisées.")
+    print("✅ Commandes slash synchronisées pour ton serveur.")
 
+# === LANCEMENT ===
 bot.run(TOKEN)
