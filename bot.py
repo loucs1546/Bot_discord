@@ -5,13 +5,12 @@ import asyncio
 import json
 from dotenv import load_dotenv
 
-# === CONFIGURATION ===
+# === CONFIG ===
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN non trouvé. Vérifie les Variables Railway.")
+    raise ValueError("❌ DISCORD_TOKEN non trouvé.")
 
-# Fichier pour stocker les salons activés par serveur
 ACTIVATED_FILE = "activated_channels.json"
 
 def load_activated_channels():
@@ -33,29 +32,72 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# === COMMANDE SLASH : /active webhook-tickets ===
+# === COMMANDE : /active ===
 @bot.tree.command(name="active", description="Active le système de tickets par webhook dans ce salon")
 async def activate_webhook_tickets(interaction: discord.Interaction):
-    # Vérifier que l'utilisateur a un rôle staff
     staff_role = None
     for name in ["Staff", "Support", "Modérateur", "Mod", "staff", "support", "Équipe ZENTYS"]:
         role = discord.utils.get(interaction.guild.roles, name=name)
-        if role:
+        if role and role in interaction.user.roles:
             staff_role = role
             break
 
-    if not staff_role or staff_role not in interaction.user.roles:
+    if not staff_role:
         await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
         return
 
     activated_channels[interaction.guild.id] = interaction.channel.id
     save_activated_channels(activated_channels)
     await interaction.response.send_message(
-        "✅ Système de tickets activé dans ce salon !\nTous les messages de webhook seront convertis en tickets.",
+        "✅ Système de tickets activé dans ce salon !",
         ephemeral=True
     )
 
-# === BOUTONS INTERACTIFS DANS LE TICKET ===
+# === COMMANDE : /ajout @Utilisateur ===
+@bot.tree.command(name="ajout", description="Ajoute un membre au salon actuel")
+@app_commands.describe(membre="Le membre à ajouter")
+async def ajout(interaction: discord.Interaction, membre: discord.Member):
+    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+
+    await interaction.channel.set_permissions(membre, read_messages=True, send_messages=True)
+    await interaction.response.send_message(f"✅ {membre.mention} a été ajouté au salon.")
+
+# === COMMANDE : /retire @Utilisateur ===
+@bot.tree.command(name="retire", description="Retire un membre du salon actuel")
+@app_commands.describe(membre="Le membre à retirer")
+async def retire(interaction: discord.Interaction, membre: discord.Member):
+    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+
+    await interaction.channel.set_permissions(membre, read_messages=False)
+    await interaction.response.send_message(f"✅ {membre.mention} a été retiré du salon.")
+
+# === COMMANDE : /messageoff @Utilisateur ===
+@bot.tree.command(name="messageoff", description="Empêche un membre d'envoyer des messages dans ce salon")
+@app_commands.describe(membre="Le membre à restreindre")
+async def messageoff(interaction: discord.Interaction, membre: discord.Member):
+    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+
+    await interaction.channel.set_permissions(membre, send_messages=False)
+    await interaction.response.send_message(f"🔇 {membre.mention} ne peut plus envoyer de messages ici.")
+
+# === COMMANDE : /urloff @Utilisateur ===
+@bot.tree.command(name="urloff", description="Empêche un membre d'envoyer des liens/images dans ce salon")
+@app_commands.describe(membre="Le membre à restreindre")
+async def urloff(interaction: discord.Interaction, membre: discord.Member):
+    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+
+    await interaction.channel.set_permissions(membre, attach_files=False, embed_links=False)
+    await interaction.response.send_message(f"🔗 {membre.mention} ne peut plus envoyer de liens ou d'images ici.")
+
+# === VUE DES BOUTONS DANS LE TICKET ===
 class TicketView(discord.ui.View):
     def __init__(self, user_id, staff_role_id):
         super().__init__(timeout=None)
@@ -65,8 +107,7 @@ class TicketView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         is_staff = any(role.id == self.staff_role_id for role in interaction.user.roles)
-        button_id = interaction.data["custom_id"]
-        if button_id in ["pause", "claim", "clear"] and not is_staff:
+        if interaction.data["custom_id"] in ["pause", "claim", "clear"] and not is_staff:
             await interaction.response.send_message("❌ Seul le staff peut utiliser ce bouton.", ephemeral=True)
             return False
         return True
@@ -77,18 +118,23 @@ class TicketView(discord.ui.View):
         channel = interaction.channel
         member = guild.get_member(self.user_id)
 
+        if not member:
+            await interaction.response.send_message("❌ Utilisateur introuvable.", ephemeral=True)
+            return
+
         if self.paused:
-            if member:
-                await channel.set_permissions(member, send_messages=True)
+            # Reprendre : réactiver l'envoi de messages
+            await channel.set_permissions(member, send_messages=True)
             button.label = "⏸️ Mettre en pause"
             button.style = discord.ButtonStyle.gray
             self.paused = False
         else:
-            if member:
-                await channel.set_permissions(member, send_messages=False)
+            # Mettre en pause : désactiver l'envoi, mais garder la lecture
+            await channel.set_permissions(member, send_messages=False)
             button.label = "▶️ Reprendre"
             button.style = discord.ButtonStyle.green
             self.paused = True
+
         await interaction.response.edit_message(view=self)
         await channel.send(f"{'✅ Le ticket a été repris.' if not self.paused else '⏸️ Le ticket est en pause.'}")
 
@@ -110,7 +156,7 @@ class TicketView(discord.ui.View):
         await asyncio.sleep(3)
         await interaction.channel.delete()
 
-# === CRÉATION DU TICKET À PARTIR D'UN WEBHOOK ===
+# === CRÉATION DU TICKET ===
 async def create_ticket_from_webhook(message):
     if not message.embeds:
         return
@@ -129,7 +175,6 @@ async def create_ticket_from_webhook(message):
     clean_tag = discord_tag.replace("#", "").replace("@", "").replace(" ", "-").lower()
     channel_name = f"ticket-{clean_tag}"
 
-    # Trouver le rôle Staff
     staff_role = None
     for name in ["Staff", "Support", "Modérateur", "Mod", "staff", "support", "Équipe ZENTYS"]:
         role = discord.utils.get(guild.roles, name=name)
@@ -141,24 +186,20 @@ async def create_ticket_from_webhook(message):
         await message.channel.send("❌ Rôle 'Staff' introuvable.")
         return
 
-    # Chercher l'utilisateur dans le serveur
     member_to_add = None
     discord_tag_clean = discord_tag.strip()
-
     if discord_tag_clean.startswith('<@') and discord_tag_clean.endswith('>'):
         try:
             user_id = int(discord_tag_clean[2:-1].replace('!', ''))
             member_to_add = guild.get_member(user_id)
         except ValueError:
             pass
-
     if not member_to_add:
         for member in guild.members:
             if member.name == discord_tag_clean or str(member) == discord_tag_clean:
                 member_to_add = member
                 break
 
-    # Permissions du salon
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -169,7 +210,6 @@ async def create_ticket_from_webhook(message):
 
     try:
         channel = await guild.create_text_channel(channel_name, overwrites=overwrites)
-
         embed_response = discord.Embed(
             title="📩 Nouveau ticket",
             color=0x00ffff,
@@ -195,27 +235,21 @@ async def create_ticket_from_webhook(message):
 async def on_message(message):
     if message.author == bot.user:
         return
-
-    # Réagir à TOUS les webhooks dans les salons activés
     if message.webhook_id is not None:
         if message.guild.id in activated_channels:
             if message.channel.id == activated_channels[message.guild.id]:
                 await create_ticket_from_webhook(message)
                 return
-
     await bot.process_commands(message)
 
-# === SYNCHRONISATION SUR TON SERVEUR (ID: 1084544847551148162) ===
+# === SYNCHRONISATION SUR TON SERVEUR ===
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user} est en ligne !")
-    # 🔴 Synchronisation INSTANTANÉE sur ton serveur de test
-    GUILD_ID = 1289495334069862452
+    GUILD_ID = 1084544847551148162
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
-    print("✅ Commandes slash synchronisées pour ton serveur.")
+    print("✅ Commandes slash synchronisées.")
 
-# === LANCEMENT ===
 bot.run(TOKEN)
-
