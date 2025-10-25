@@ -210,7 +210,7 @@ async def on_message(message):
 async def on_ready():
     print(f"✅ {bot.user} est en ligne !")
     # 🔴 Synchronisation INSTANTANÉE sur ton serveur de test
-    GUILD_ID = 1084544847551148162
+    GUILD_ID = 1289495334069862452
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
@@ -218,3 +218,4 @@ async def on_ready():
 
 # === LANCEMENT ===
 bot.run(TOKEN)
+
