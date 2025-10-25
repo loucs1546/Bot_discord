@@ -1,101 +1,146 @@
 import discord
 from discord.ext import commands
-from discord import app_commands  # ✅ Import ajouté
+from discord import app_commands
 import os
 import asyncio
 import json
+from datetime import datetime
 from dotenv import load_dotenv
 
-# === CONFIGURATION ===
+# === CONFIG ===
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN non trouvé. Vérifie les Variables Railway.")
+    raise ValueError("❌ DISCORD_TOKEN non trouvé.")
 
+# Fichiers de configuration
 ACTIVATED_FILE = "activated_channels.json"
+WELCOME_FILE = "welcome_channels.json"
+GOODBYE_FILE = "goodbye_channels.json"
+LOGS_FILE = "logs_channels.json"
 
-def load_activated_channels():
-    if os.path.exists(ACTIVATED_FILE):
-        with open(ACTIVATED_FILE, "r", encoding="utf-8") as f:
+def load_json(file):
+    if os.path.exists(file):
+        with open(file, "r", encoding="utf-8") as f:
             return {int(k): int(v) for k, v in json.load(f).items()}
     return {}
 
-def save_activated_channels(data):
-    with open(ACTIVATED_FILE, "w", encoding="utf-8") as f:
+def save_json(file, data):
+    with open(file, "w", encoding="utf-8") as f:
         json.dump({str(k): v for k, v in data.items()}, f)
 
-activated_channels = load_activated_channels()
+activated_channels = load_json(ACTIVATED_FILE)
+welcome_channels = load_json(WELCOME_FILE)
+goodbye_channels = load_json(GOODBYE_FILE)
+logs_channels = load_json(LOGS_FILE)
 
 # === BOT SETUP ===
-intents = discord.Intents.default()
+intents = discord.Intents.all()  # Nécessaire pour les logs complets
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# === UTILS ===
+STAFF_ROLES = ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"]
+
+def is_staff(member):
+    return any(role.name in STAFF_ROLES for role in member.roles)
+
 # === COMMANDE : /active ===
 @bot.tree.command(name="active", description="Active le système de tickets par webhook dans ce salon")
 async def activate_webhook_tickets(interaction: discord.Interaction):
-    staff_role = None
-    for name in ["Staff", "Support", "Modérateur", "Mod", "staff", "support", "Équipe ZENTYS"]:
-        role = discord.utils.get(interaction.guild.roles, name=name)
-        if role and role in interaction.user.roles:
-            staff_role = role
-            break
-
-    if not staff_role:
-        await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
-        return
-
-    activated_channels[interaction.guild.id] = interaction.channel.id
-    save_activated_channels(activated_channels)
-    await interaction.response.send_message("✅ Système de tickets activé dans ce salon !", ephemeral=True)
-
-# === COMMANDE : /ajout @Utilisateur ===
-@bot.tree.command(name="ajout", description="Ajoute un membre au salon actuel")
-@app_commands.describe(membre="Le membre à ajouter")
-async def ajout(interaction: discord.Interaction, membre: discord.Member):
-    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+    if not is_staff(interaction.user):
         await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
         return
+    activated_channels[interaction.guild.id] = interaction.channel.id
+    save_json(ACTIVATED_FILE, activated_channels)
+    await interaction.response.send_message("✅ Système de tickets activé dans ce salon !", ephemeral=True)
 
+# === COMMANDE : /rajout @Utilisateur ===
+@bot.tree.command(name="rajout", description="Ajoute un membre au salon actuel")
+@app_commands.describe(membre="Le membre à ajouter")
+async def rajout(interaction: discord.Interaction, membre: discord.Member):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
     await interaction.channel.set_permissions(membre, read_messages=True, send_messages=True)
     await interaction.response.send_message(f"✅ {membre.mention} a été ajouté au salon.")
 
 # === COMMANDE : /retire @Utilisateur ===
-@bot.tree.command(name="retire", description="Retire un membre du salon actuel")
+@bot.tree.command(name="retire", description="Retire un membre du salon actuel (lecture + écriture)")
 @app_commands.describe(membre="Le membre à retirer")
 async def retire(interaction: discord.Interaction, membre: discord.Member):
-    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+    if not is_staff(interaction.user):
         await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
         return
-
-    await interaction.channel.set_permissions(membre, read_messages=False)
+    await interaction.channel.set_permissions(membre, read_messages=False, send_messages=False)
     await interaction.response.send_message(f"✅ {membre.mention} a été retiré du salon.")
 
 # === COMMANDE : /messageoff @Utilisateur ===
-@bot.tree.command(name="messageoff", description="Empêche un membre d'envoyer des messages dans ce salon")
+@bot.tree.command(name="messageoff", description="Empêche un membre d'envoyer des messages (il reste dans le salon)")
 @app_commands.describe(membre="Le membre à restreindre")
 async def messageoff(interaction: discord.Interaction, membre: discord.Member):
-    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+    if not is_staff(interaction.user):
         await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
         return
-
     await interaction.channel.set_permissions(membre, send_messages=False)
     await interaction.response.send_message(f"🔇 {membre.mention} ne peut plus envoyer de messages ici.")
 
 # === COMMANDE : /urloff @Utilisateur ===
-@bot.tree.command(name="urloff", description="Empêche un membre d'envoyer des liens/images dans ce salon")
+@bot.tree.command(name="urloff", description="Bloque les liens/images pour un membre")
 @app_commands.describe(membre="Le membre à restreindre")
 async def urloff(interaction: discord.Interaction, membre: discord.Member):
-    if not any(role.name in ["Staff", "Support", "Modérateur", "Mod", "Équipe ZENTYS"] for role in interaction.user.roles):
+    if not is_staff(interaction.user):
         await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
         return
-
     await interaction.channel.set_permissions(membre, attach_files=False, embed_links=False)
     await interaction.response.send_message(f"🔗 {membre.mention} ne peut plus envoyer de liens ou d'images ici.")
 
-# === VUE DES BOUTONS DANS LE TICKET ===
+# === COMMANDE : /welcome-salon ===
+@bot.tree.command(name="welcome-salon", description="Définir ce salon comme salon de bienvenue")
+async def welcome_salon(interaction: discord.Interaction):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+    welcome_channels[interaction.guild.id] = interaction.channel.id
+    save_json(WELCOME_FILE, welcome_channels)
+    await interaction.response.send_message("✅ Salon de bienvenue configuré !", ephemeral=True)
+
+# === COMMANDE : /bye-salon ===
+@bot.tree.command(name="bye-salon", description="Définir ce salon comme salon d'au revoir")
+async def bye_salon(interaction: discord.Interaction):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+    goodbye_channels[interaction.guild.id] = interaction.channel.id
+    save_json(GOODBYE_FILE, goodbye_channels)
+    await interaction.response.send_message("✅ Salon d'au revoir configuré !", ephemeral=True)
+
+# === COMMANDE : /logs-salon ===
+@bot.tree.command(name="logs-salon", description="Définir ce salon comme salon de logs")
+async def logs_salon(interaction: discord.Interaction):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+    logs_channels[interaction.guild.id] = interaction.channel.id
+    save_json(LOGS_FILE, logs_channels)
+    await interaction.response.send_message("✅ Salon de logs configuré !", ephemeral=True)
+
+# === COMMANDE : /message #salon ===
+@bot.tree.command(name="message", description="Envoie un message anonyme dans un salon (staff uniquement)")
+@app_commands.describe(salon="Le salon cible", contenu="Le message à envoyer")
+async def message_command(interaction: discord.Interaction, salon: discord.TextChannel, contenu: str):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message("❌ Tu n'as pas la permission.", ephemeral=True)
+        return
+    try:
+        await salon.send(contenu)
+        await interaction.response.send_message(f"✅ Message envoyé dans {salon.mention}.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+
+# === BOUTONS DANS LE TICKET ===
 class TicketView(discord.ui.View):
     def __init__(self, user_id, staff_role_id):
         super().__init__(timeout=None)
@@ -115,7 +160,6 @@ class TicketView(discord.ui.View):
         guild = interaction.guild
         channel = interaction.channel
         member = guild.get_member(self.user_id)
-
         if not member:
             await interaction.response.send_message("❌ Utilisateur introuvable.", ephemeral=True)
             return
@@ -126,7 +170,7 @@ class TicketView(discord.ui.View):
             button.style = discord.ButtonStyle.gray
             self.paused = False
         else:
-            await channel.set_permissions(member, send_messages=False)
+            await channel.set_permissions(member, send_messages=False)  # ✅ Ne retire PAS la lecture
             button.label = "▶️ Reprendre"
             button.style = discord.ButtonStyle.green
             self.paused = True
@@ -152,7 +196,7 @@ class TicketView(discord.ui.View):
         await asyncio.sleep(3)
         await interaction.channel.delete()
 
-# === CRÉATION DU TICKET À PARTIR D'UN WEBHOOK ===
+# === CRÉATION DU TICKET ===
 async def create_ticket_from_webhook(message):
     if not message.embeds:
         return
@@ -172,7 +216,7 @@ async def create_ticket_from_webhook(message):
     channel_name = f"ticket-{clean_tag}"
 
     staff_role = None
-    for name in ["Staff", "Support", "Modérateur", "Mod", "staff", "support", "Équipe ZENTYS"]:
+    for name in STAFF_ROLES:
         role = discord.utils.get(guild.roles, name=name)
         if role:
             staff_role = role
@@ -206,7 +250,6 @@ async def create_ticket_from_webhook(message):
 
     try:
         channel = await guild.create_text_channel(channel_name, overwrites=overwrites)
-
         embed_response = discord.Embed(
             title="📩 Nouveau ticket",
             color=0x00ffff,
@@ -227,7 +270,7 @@ async def create_ticket_from_webhook(message):
     except Exception as e:
         await message.channel.send(f"❌ Erreur : {e}")
 
-# === ÉCOUTE DES MESSAGES ===
+# === ÉCOUTE DES MESSAGES WEBHOOK ===
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -239,7 +282,54 @@ async def on_message(message):
                 return
     await bot.process_commands(message)
 
-# === SYNCHRONISATION SUR TON SERVEUR (ID: 1084544847551148162) ===
+# === BIENVENUE / AU REVOIR ===
+@bot.event
+async def on_member_join(member):
+    if member.guild.id in welcome_channels:
+        channel = member.guild.get_channel(welcome_channels[member.guild.id])
+        if channel:
+            await channel.send(f"🎉 Bienvenue {member.mention} sur **{member.guild.name}** !")
+
+@bot.event
+async def on_member_remove(member):
+    if member.guild.id in goodbye_channels:
+        channel = member.guild.get_channel(goodbye_channels[member.guild.id])
+        if channel:
+            await channel.send(f"👋 {member.name}#{member.discriminator} a quitté le serveur.")
+
+# === SYSTÈME DE LOGS COMPLET ===
+async def send_log(guild, content):
+    if guild.id in logs_channels:
+        channel = guild.get_channel(logs_channels[guild.id])
+        if channel:
+            await channel.send(content)
+
+@bot.event
+async def on_message_delete(message):
+    if message.author.bot:
+        return
+    await send_log(message.guild, f"🗑️ **Message supprimé** dans {message.channel.mention} par {message.author.mention} :\n> {message.content}")
+
+@bot.event
+async def on_message_edit(before, after):
+    if before.author.bot or before.content == after.content:
+        return
+    await send_log(before.guild, f"✏️ **Message édité** dans {before.channel.mention} par {before.author.mention} :\n**Avant :** {before.content}\n**Après :** {after.content}")
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if before.channel != after.channel:
+        if after.channel:
+            await send_log(member.guild, f"🔊 {member.mention} a rejoint le salon vocal **{after.channel.name}**.")
+        if before.channel and after.channel != before.channel:
+            await send_log(member.guild, f"🔇 {member.mention} a quitté le salon vocal **{before.channel.name}**.")
+
+@bot.event
+async def on_member_update(before, after):
+    if before.nick != after.nick:
+        await send_log(after.guild, f"📛 {before.mention} a changé de pseudo : `{before.nick or before.name}` → `{after.nick or after.name}`")
+
+# === SYNCHRONISATION SUR TON SERVEUR ===
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user} est en ligne !")
@@ -247,7 +337,6 @@ async def on_ready():
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
-    print("✅ Commandes slash synchronisées pour ton serveur.")
+    print("✅ Commandes slash synchronisées.")
 
-# === LANCEMENT ===
 bot.run(TOKEN)
