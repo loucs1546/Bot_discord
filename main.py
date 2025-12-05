@@ -13,6 +13,7 @@ import re
 import io
 import requests
 from utils.logging import send_log_to
+from utils.config_manager import save_guild_config, load_guild_config_from_file, create_backup_channel, send_missing_config_alert
 
 # === MINI SERVEUR WEB POUR RENDRE/KEEP ALIVE ===
 import os
@@ -378,7 +379,7 @@ class TicketManagementView(discord.ui.View):
     
     @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_close")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Close = Disable permissions + rename"""
+        """Close = Disable permissions for everyone except high ranks"""
         if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
             await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
             return
@@ -397,13 +398,30 @@ class TicketManagementView(discord.ui.View):
         except:
             pass
         
-        # Désactiver toutes les permissions d'envoi
+        # Récupérer les rôles hauts gradés depuis la config
+        high_rank_roles = []
+        for role_type in ["founder", "admin", "moderator"]:
+            role_id = config.CONFIG.get("roles", {}).get(role_type)
+            if role_id:
+                role = interaction.guild.get_role(role_id)
+                if role:
+                    high_rank_roles.append(role)
+        
+        # Désactiver toutes les permissions d'envoi sauf pour les hauts gradés
         for role in interaction.guild.roles:
             if role != interaction.guild.default_role:
-                try:
-                    await channel.set_permissions(role, send_messages=False, add_reactions=False)
-                except:
-                    pass
+                if role in high_rank_roles:
+                    # Les hauts gradés gardent les droits
+                    try:
+                        await channel.set_permissions(role, send_messages=True, add_reactions=True)
+                    except:
+                        pass
+                else:
+                    # Les autres perdent les droits
+                    try:
+                        await channel.set_permissions(role, send_messages=False, add_reactions=False)
+                    except:
+                        pass
         
         # Désactiver pour @everyone aussi
         try:
@@ -426,14 +444,14 @@ class TicketManagementView(discord.ui.View):
         
         embed = discord.Embed(
             title="🔒 Ticket Fermé",
-            description=f"Par {interaction.user.mention}\n💬 {msg_count} messages\n\n✨ Le ticket sera supprimé automatiquement.",
+            description=f"Par {interaction.user.mention}\n💬 {msg_count} messages\n\n🔐 Seuls les hauts gradés peuvent parler.\n✨ Le ticket sera supprimé automatiquement.",
             color=0xe74c3c
         )
         await interaction.followup.send(embed=embed)
     
     @discord.ui.button(label="🔓 Réouvrir", style=discord.ButtonStyle.success, emoji="🔓", custom_id="ticket_reopen")
     async def reopen_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Reopen = Restore permissions"""
+        """Reopen = Restore all permissions"""
         if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
             await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
             return
@@ -451,39 +469,37 @@ class TicketManagementView(discord.ui.View):
             except:
                 pass
         
-        # Rétablir les permissions
-        owner = interaction.guild.get_member(self.owner_id)
-        if owner:
-            try:
-                await channel.set_permissions(
-                    owner,
-                    read_messages=True,
-                    send_messages=True,
-                    add_reactions=True,
-                    attach_files=False,  # Always keep off
-                    embed_links=False     # Always keep off
-                )
-            except:
-                pass
-        
-        # Rétablir pour le staff
+        # Rétablir les permissions pour TOUS les rôles
         for role in interaction.guild.roles:
-            if role.permissions.administrator or role.permissions.manage_messages:
+            if role != interaction.guild.default_role:
                 try:
                     await channel.set_permissions(role, send_messages=True, add_reactions=True)
                 except:
                     pass
         
-        # Réactiver le bouton Fermer
+        # Rétablir pour @everyone aussi
+        try:
+            await channel.set_permissions(
+                interaction.guild.default_role,
+                read_messages=True,
+                send_messages=True,
+                add_reactions=True,
+                attach_files=False,  # Always keep off
+                embed_links=False     # Always keep off
+            )
+        except:
+            pass
+        
+        # Désactiver le bouton Réouvrir, activer Fermer
+        button.disabled = True
         for btn in self.children:
             if btn.label == "🔒 Fermer":
                 btn.disabled = False
-            elif btn.label == "🔓 Réouvrir":
-                btn.disabled = True
+                break
         
         embed = discord.Embed(
             title="🔓 Ticket Réouvert",
-            description=f"Par {interaction.user.mention}\n\nVous pouvez envoyer des messages à nouveau.",
+            description=f"Par {interaction.user.mention}\n\n✅ Tous les participants peuvent à nouveau parler.",
             color=0x2ecc71
         )
         await interaction.followup.send(embed=embed)
@@ -678,6 +694,22 @@ async def on_ready():
                 print(f"✅ {len(synced)} commandes globales synchronisées")
         except Exception as e:
             print(f"❌ Erreur synchronisation : {e}")
+        
+        # ===== CHARGER LES CONFIGURATIONS SAUVEGARDÉES =====
+        print("\n🔍 Recherche des configurations sauvegardées...")
+        for guild in bot.guilds:
+            try:
+                loaded_config = await load_guild_config_from_file(guild)
+                if loaded_config:
+                    # Fusionner avec la config existante
+                    config.CONFIG.update(loaded_config)
+                    print(f"✅ Configuration chargée pour {guild.name}")
+                else:
+                    # Envoyer une alerte si config non trouvée
+                    await send_missing_config_alert(guild)
+                    print(f"⚠️ Configuration non trouvée pour {guild.name}")
+            except Exception as e:
+                print(f"❌ Erreur chargement config pour {guild.name}: {e}")
         
         cogs_loaded = True
         
@@ -1681,8 +1713,18 @@ class SetupFinishView(discord.ui.View):
 
     @discord.ui.button(label="⏭️ Passer", style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Créer le salon Sauvegarde
+        backup_channel = await create_backup_channel(self.guild)
+        
+        # Sauvegarder la configuration
+        if backup_channel:
+            await save_guild_config(self.guild, config.CONFIG)
+        
         await interaction.response.send_message(
-            "✅ **Setup Terminé!**\n\nVous pouvez configurer les tickets plus tard avec `/ticket-config`",
+            "✅ **Setup Terminé!**\n\n"
+            "🔒 Votre configuration a été sauvegardée dans le salon **📁-sauvegarde**\n"
+            "⚠️ Ne supprimez pas ce fichier - le bot en a besoin pour se reconfigurer!\n\n"
+            "Vous pouvez configurer les tickets plus tard avec `/ticket-config`",
             ephemeral=True
         )
         # Envoyer POUR_TOI.txt
