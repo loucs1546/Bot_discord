@@ -1321,6 +1321,15 @@ class RolesSalonsView(discord.ui.View):
         super().__init__(timeout=600)
         self.guild = guild
 
+    @discord.ui.button(label="🎫 Rôle de Base", style=discord.ButtonStyle.primary)
+    async def set_default_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎫 Rôle de Base à l'Arrivée",
+            description="Choisissez le rôle de base dans la liste",
+            color=0x9b59b6
+        )
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "default", next_view_factory=lambda g: RolesSalonsView(g)))
+
     @discord.ui.button(label="👑 Rôle Admin", style=discord.ButtonStyle.primary)
     async def set_admin_role(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
@@ -1543,6 +1552,32 @@ async def salon_links(interaction: discord.Interaction, actif: bool):
 # === COMMANDES DE SETUP ===
 # ============================
 
+class SetupStep0View(discord.ui.View):
+    """Étape 0: Rôle de base à l'arrivée"""
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
+
+    @discord.ui.button(label="🎫 Sélectionner Rôle de Base", style=discord.ButtonStyle.primary)
+    async def select_base_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Étape 0/6",
+            description="Choisissez le rôle de base à donner à l'arrivée d'un nouveau membre",
+            color=0x3498db
+        )
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "default", next_view_factory=lambda g: SetupStep1View(g, self.source_channel), back_view_factory=lambda g: SetupStep0View(g, self.source_channel)))
+
+    @discord.ui.button(label="⏭️ Passer", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Étape 1/6",
+            description="**Rôles à l'arrivée d'un nouveau membre**\n\nQuels rôles doivent être attribués automatiquement à l'arrivée ?",
+            color=0x3498db
+        )
+        await interaction.response.edit_message(embed=embed, view=SetupStep1View(self.guild, self.source_channel))
+
+
 class SetupStep1View(discord.ui.View):
     """Étape 1: Rôle Admin"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
@@ -1666,11 +1701,11 @@ class SetupFinishView(discord.ui.View):
 async def start_setup(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
-        title="🎓 Setup Seiko - Étape 1/6",
-        description="**Rôles à l'arrivée d'un nouveau membre**\n\nQuels rôles doivent être attribués automatiquement à l'arrivée ?",
+        title="🎓 Setup Seiko - Étape 0/6",
+        description="**Rôle de base à l'arrivée**\n\nQuel rôle donner automatiquement à l'arrivée d'un nouveau membre ?",
         color=0x3498db
     )
-    await interaction.followup.send(embed=embed, view=SetupStep1View(interaction.guild, interaction.channel), ephemeral=True)
+    await interaction.followup.send(embed=embed, view=SetupStep0View(interaction.guild, interaction.channel), ephemeral=True)
 
 
 # ============================

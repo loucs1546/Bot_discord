@@ -26,6 +26,12 @@ CONFIG: Dict[str, Any] = {
     "ticket_config": {
         "mode": "basic",  # "basic" ou "advanced"
         "options": []  # List[str] - options de tickets personnalisées en mode advanced
+    },
+    "roles": {
+        "default": None,  # Rôle de base à l'arrivée
+        "admin": None,
+        "moderator": None,
+        "founder": None
     }
 }
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
