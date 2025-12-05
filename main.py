@@ -376,204 +376,29 @@ class TicketManagementView(discord.ui.View):
             color=0x2ecc71
         )
         await interaction.followup.send(embed=embed)
-    
-    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_close")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Close = Disable permissions for everyone except high ranks"""
-        if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
+    @discord.ui.button(label="🛠️ Prendre en charge", style=discord.ButtonStyle.secondary, emoji="🛠️", custom_id="ticket_take")
+    async def take_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Prendre en charge = signale que le staff prend en charge la demande"""
+        # Autorisé seulement pour fondateur/admin/modérateur
+        allowed = False
+        # rôles définis dans la config
+        role_ids = [config.CONFIG.get("roles", {}).get(k) for k in ("founder", "admin", "moderator")]
+        role_ids = [rid for rid in role_ids if rid]
+        for role in interaction.user.roles:
+            if role.id in role_ids or role.permissions.administrator or role.permissions.manage_messages:
+                allowed = True
+                break
+        if not allowed:
             await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
             return
-        
+
         await interaction.response.defer()
-        channel = interaction.channel
-        self.is_closed = True
-        
-        # Récupérer le nombre de messages
-        msg_count = sum(1 async for _ in channel.history(limit=None))
-        
-        # Renommer en close-ticket-XXXXXX
-        old_name = channel.name
+        # Envoyer un message public dans le ticket
         try:
-            await channel.edit(name=f"close-{old_name}")
-        except:
-            pass
-        
-        # Récupérer les rôles hauts gradés depuis la config
-        high_rank_roles = []
-        for role_type in ["founder", "admin", "moderator"]:
-            role_id = config.CONFIG.get("roles", {}).get(role_type)
-            if role_id:
-                role = interaction.guild.get_role(role_id)
-                if role:
-                    high_rank_roles.append(role)
-        # Ajouter également les rôles qui ont les permissions d'administration ou manage_messages
-        for role in interaction.guild.roles:
-            try:
-                if role.permissions.administrator or role.permissions.manage_messages:
-                    if role not in high_rank_roles:
-                        high_rank_roles.append(role)
-            except Exception:
-                continue
-
-        # Sauvegarder la liste des participants (membres et rôles) ayant accès actuellement
-        participants = {"members": [], "roles": []}
-        try:
-            for target, ow in channel.overwrites.items():
-                try:
-                    # Member
-                    if isinstance(target, discord.Member):
-                        if ow.send_messages or ow.read_messages:
-                            participants["members"].append(target.id)
-                    # Role
-                    else:
-                        if ow.send_messages or ow.read_messages:
-                            participants["roles"].append(target.id)
-                except Exception:
-                    continue
-            # S'assurer que le propriétaire (owner) est présent
-            owner_id = getattr(self, 'owner_id', None)
-            if owner_id and owner_id not in participants["members"]:
-                participants["members"].append(owner_id)
-
-            # Stocker dans le topic du channel (suffixe spécial)
-            try:
-                import json as _json
-                marker = "[SEIKO_PARTICIPANTS]"
-                payload = _json.dumps(participants)
-                new_topic = (channel.topic or "") + "\n" + marker + payload
-                await channel.edit(topic=new_topic)
-            except Exception as e:
-                print(f"[Ticket] Impossible d'écrire participants dans topic: {e}")
+            await interaction.channel.send(f"✅ {interaction.user.mention} prend en charge votre demande.")
+            await interaction.followup.send("✅ Vous avez pris en charge le ticket.", ephemeral=True)
         except Exception as e:
-            print(f"[Ticket] Erreur lors de la récupération des overwrites: {e}")
-        
-        # Ensurer que tous les participants perdent le droit d'envoyer des messages (ils seront restaurés au reopen)
-        for member_id in participants.get("members", []):
-            try:
-                m = interaction.guild.get_member(member_id)
-                if m:
-                    await channel.set_permissions(m, send_messages=False, read_messages=True, add_reactions=False)
-            except:
-                pass
-        
-        # Désactiver toutes les permissions d'envoi sauf pour les hauts gradés
-        for role in interaction.guild.roles:
-            if role != interaction.guild.default_role:
-                if role in high_rank_roles:
-                    # Les hauts gradés gardent les droits
-                    try:
-                        await channel.set_permissions(role, send_messages=True, add_reactions=True)
-                    except:
-                        pass
-                else:
-                    # Les autres perdent les droits
-                    try:
-                        await channel.set_permissions(role, send_messages=False, add_reactions=False)
-                    except:
-                        pass
-        
-        # Désactiver pour @everyone aussi
-        try:
-            await channel.set_permissions(
-                interaction.guild.default_role, 
-                send_messages=False, 
-                add_reactions=False,
-                embed_links=False
-            )
-        except:
-            pass
-        
-        # Désactiver le bouton Fermer, activer Réouvrir
-        button.disabled = True
-        close_btn = None
-        for btn in self.children:
-            if btn.label == "🔓 Réouvrir":
-                btn.disabled = False
-                break
-        
-        embed = discord.Embed(
-            title="🔒 Ticket Fermé",
-            description=f"Par {interaction.user.mention}\n💬 {msg_count} messages\n\n🔐 Seuls les hauts gradés peuvent parler.\n✨ Le ticket sera supprimé automatiquement.",
-            color=0xe74c3c
-        )
-        await interaction.followup.send(embed=embed)
-    
-    @discord.ui.button(label="🔓 Réouvrir", style=discord.ButtonStyle.success, emoji="🔓", custom_id="ticket_reopen")
-    async def reopen_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Reopen = Restore all permissions"""
-        if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
-            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
-            return
-        
-        await interaction.response.defer()
-        channel = interaction.channel
-        self.is_closed = False
-        
-        # Renommer back to ticket-XXXXXX
-        old_name = channel.name
-        if old_name.startswith("close-"):
-            new_name = old_name[6:]  # Remove "close-" prefix
-            try:
-                await channel.edit(name=new_name)
-            except:
-                pass
-        
-        # Rétablir les permissions uniquement pour les participants sauvegardés
-        # Lire la liste des participants depuis le topic si présent
-        participants = {"members": [], "roles": []}
-        try:
-            if channel.topic and "[SEIKO_PARTICIPANTS]" in channel.topic:
-                marker = "[SEIKO_PARTICIPANTS]"
-                parts = channel.topic.split(marker)
-                # dernier segment contient le JSON
-                json_part = parts[-1].strip()
-                import json as _json
-                try:
-                    participants = _json.loads(json_part)
-                except Exception:
-                    participants = {"members": [], "roles": []}
-                # Nettoyer le topic en enlevant le marqueur + payload
-                new_topic = marker.join(parts[:-1]).strip()
-                try:
-                    await channel.edit(topic=new_topic if new_topic else None)
-                except:
-                    pass
-        except Exception as e:
-            print(f"[Ticket] Erreur lecture participants depuis topic: {e}")
-
-        # Restaurer les permissions pour les membres listés
-        for member_id in participants.get("members", []):
-            try:
-                m = interaction.guild.get_member(member_id)
-                if m:
-                    await channel.set_permissions(m, read_messages=True, send_messages=True, add_reactions=True)
-            except:
-                pass
-
-        # Restaurer les permissions pour les rôles listés
-        for role_id in participants.get("roles", []):
-            try:
-                r = interaction.guild.get_role(role_id)
-                if r:
-                    await channel.set_permissions(r, send_messages=True, add_reactions=True)
-            except:
-                pass
-
-        # Ne pas changer les permissions du @everyone (conserver le comportement restreint)
-
-        # Désactiver le bouton Réouvrir, activer Fermer
-        button.disabled = True
-        for btn in self.children:
-            if btn.label == "🔒 Fermer":
-                btn.disabled = False
-                break
-
-        embed = discord.Embed(
-            title="🔓 Ticket Réouvert",
-            description=f"Par {interaction.user.mention}\n\n✅ Les membres du ticket peuvent à nouveau parler.",
-            color=0x2ecc71
-        )
-        await interaction.followup.send(embed=embed)
+            await interaction.followup.send(f"❌ Erreur: {e}", ephemeral=True)
     
     @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, emoji="❌", custom_id="ticket_delete")
     async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1210,6 +1035,11 @@ class TicketConfigView(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
         # Si appelé depuis /start, envoyer POUR_TOI.txt
         await self._send_guide_if_needed()
+        # Sauvegarder la configuration dans le salon de sauvegarde
+        try:
+            await save_guild_config(interaction.guild, config.CONFIG)
+        except Exception:
+            pass
     
     @discord.ui.button(label="Advanced Mode", style=discord.ButtonStyle.success, emoji="✨")
     async def advanced_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1274,6 +1104,11 @@ class TicketConfigView(discord.ui.View):
                                     await source_ch.send(file=discord.File(str(file_path), filename='POUR_TOI.txt'))
                             except Exception as e:
                                 print(f"[TicketConfig] Erreur envoi POUR_TOI.txt: {e}")
+                        # Sauvegarder la configuration dans le salon de sauvegarde
+                        try:
+                            await save_guild_config(finish_interaction.guild, config.CONFIG)
+                        except Exception:
+                            pass
                 
                 embed_first = discord.Embed(
                     title="✅ Option Créée",
@@ -1313,26 +1148,15 @@ async def ticket_panel(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Pannel de tickets envoyé.", ephemeral=True)
 
 
-@bot.tree.command(name="add-user", description="Ajoute un utilisateur au ticket courant (par nom)" )
-@discord.app_commands.describe(nom="Nom ou pseudo de l'utilisateur à ajouter")
+@bot.tree.command(name="add-user", description="Ajoute un utilisateur au ticket courant")
+@discord.app_commands.describe(member="Membre à ajouter au ticket")
 @discord.app_commands.checks.has_permissions(manage_channels=True)
-async def add_user(interaction: discord.Interaction, nom: str):
+async def add_user(interaction: discord.Interaction, member: discord.Member):
     guild = interaction.guild
     channel = interaction.channel
     if not channel.name.startswith("ticket-") and not channel.name.startswith("close-"):
         await interaction.response.send_message("❌ Cette commande ne peut être utilisée que dans un ticket.", ephemeral=True)
         return
-
-    # Chercher le membre par nom/affichage (insensible à la casse)
-    lname = nom.lower()
-    matches = [m for m in guild.members if lname in (m.display_name or "").lower() or lname in (m.name or "").lower()]
-    if not matches:
-        await interaction.response.send_message("🔍 Aucun membre trouvé pour ce nom.", ephemeral=True)
-        return
-    # Si plusieurs, privilégier exact
-    member = None
-    exact = [m for m in matches if (m.display_name or "").lower() == lname or (m.name or "").lower() == lname]
-    member = exact[0] if exact else matches[0]
 
     try:
         await channel.set_permissions(member, read_messages=True, send_messages=True, add_reactions=True, attach_files=False, embed_links=False)
@@ -1341,23 +1165,15 @@ async def add_user(interaction: discord.Interaction, nom: str):
         await interaction.response.send_message(f"❌ Erreur: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="remove-user", description="Retire un utilisateur du ticket courant (par nom)" )
-@discord.app_commands.describe(nom="Nom ou pseudo de l'utilisateur à retirer")
+@bot.tree.command(name="remove-user", description="Retire un utilisateur du ticket courant")
+@discord.app_commands.describe(member="Membre à retirer du ticket")
 @discord.app_commands.checks.has_permissions(manage_channels=True)
-async def remove_user(interaction: discord.Interaction, nom: str):
+async def remove_user(interaction: discord.Interaction, member: discord.Member):
     guild = interaction.guild
     channel = interaction.channel
     if not channel.name.startswith("ticket-") and not channel.name.startswith("close-"):
         await interaction.response.send_message("❌ Cette commande ne peut être utilisée que dans un ticket.", ephemeral=True)
         return
-
-    lname = nom.lower()
-    matches = [m for m in guild.members if lname in (m.display_name or "").lower() or lname in (m.name or "").lower()]
-    if not matches:
-        await interaction.response.send_message("🔍 Aucun membre trouvé pour ce nom.", ephemeral=True)
-        return
-    exact = [m for m in matches if (m.display_name or "").lower() == lname or (m.name or "").lower() == lname]
-    member = exact[0] if exact else matches[0]
 
     try:
         # Retirer l'accès
@@ -1406,17 +1222,8 @@ class ConfigMainView(discord.ui.View):
 
     @discord.ui.button(label="✅ Terminer", style=discord.ButtonStyle.success)
     async def finish_and_send_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Envoie le fichier POUR_TOI.txt dans le salon d'où la commande a été utilisée"""
-        await interaction.response.defer(ephemeral=True)
-        try:
-            file_path = Path('POUR_TOI.txt')
-            if file_path.exists():
-                await interaction.followup.send("✅ Guide envoyé dans le salon.", ephemeral=True)
-                await interaction.channel.send(file=discord.File(str(file_path), filename='POUR_TOI.txt'))
-            else:
-                await interaction.followup.send("❌ Le fichier `POUR_TOI.txt` est introuvable.", ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Erreur en envoyant le guide : {e}", ephemeral=True)
+        """Terminer la configuration (ne pas afficher le guide ici)."""
+        await interaction.response.send_message("✅ Configuration enregistrée. Le guide et la sauvegarde sont disponibles dans le salon privé de sauvegarde.", ephemeral=True)
 
 
 class RolesSalonsView(discord.ui.View):

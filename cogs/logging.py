@@ -124,9 +124,11 @@ class LoggingCog(commands.Cog):
             old_nick = before.nick or before.global_name or before.name
             new_nick = after.nick or after.global_name or after.name
 
+            # Si on ne trouve pas le modérateur via audit logs, afficher le pseudo de la personne concernée
+            fait_par = moderator.mention if moderator else after.display_name
             embed = discord.Embed(
                 title="📛 Pseudo modifié",
-                description=f"{after.mention}\n**Avant** : {old_nick}\n**Après** : {new_nick}\n**Fait par** : {moderator.mention if moderator else 'Inconnu'}",
+                description=f"{after.mention}\n**Avant** : {old_nick}\n**Après** : {new_nick}\n**Fait par** : {fait_par}",
                 color=0x00ccff,
                 timestamp=discord.utils.utcnow()
             )

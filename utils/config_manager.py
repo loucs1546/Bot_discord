@@ -32,12 +32,22 @@ async def save_guild_config(guild: discord.Guild, config: Dict[str, Any]) -> Opt
         with open(backup_file, 'w', encoding='utf-8') as f:
             json.dump(backup_data, f, indent=2, ensure_ascii=False)
 
-        # Chercher le salon "Sauvegarde"
+        # Chercher le salon "Sauvegarde" (tolérance sur le nom)
         save_channel = None
         for channel in guild.text_channels:
-            if channel.name == "sauvegarde" and isinstance(channel, discord.TextChannel):
-                save_channel = channel
-                break
+            try:
+                if isinstance(channel, discord.TextChannel) and "sauvegarde" in channel.name.lower():
+                    save_channel = channel
+                    break
+            except Exception:
+                continue
+
+        # Créer le salon si nécessaire
+        if not save_channel:
+            try:
+                save_channel = await create_backup_channel(guild)
+            except Exception:
+                save_channel = None
 
         if not save_channel:
             return None
@@ -52,6 +62,10 @@ async def save_guild_config(guild: discord.Guild, config: Dict[str, Any]) -> Opt
         embed.set_footer(text=f"Guild ID: {guild.id}")
 
         message = await save_channel.send(embed=embed, file=discord.File(backup_file, filename=CONFIG_FILENAME))
+        try:
+            await message.pin()
+        except Exception:
+            pass
         return message
 
     except Exception as e:
@@ -65,12 +79,15 @@ async def load_guild_config_from_file(guild: discord.Guild) -> Optional[Dict[str
     Retourne la config ou None si non trouvée
     """
     try:
-        # Chercher le salon "Sauvegarde"
+        # Chercher le salon "Sauvegarde" (tolérance sur le nom)
         save_channel = None
         for channel in guild.text_channels:
-            if channel.name == "sauvegarde" and isinstance(channel, discord.TextChannel):
-                save_channel = channel
-                break
+            try:
+                if isinstance(channel, discord.TextChannel) and "sauvegarde" in channel.name.lower():
+                    save_channel = channel
+                    break
+            except Exception:
+                continue
 
         if not save_channel:
             return None
@@ -100,10 +117,13 @@ async def create_backup_channel(guild: discord.Guild) -> Optional[discord.TextCh
     Retourne le canal créé ou None en cas d'erreur
     """
     try:
-        # Vérifier si le salon existe déjà
+        # Vérifier si le salon existe déjà (tolérance sur le nom)
         for channel in guild.text_channels:
-            if channel.name == "sauvegarde":
-                return channel
+            try:
+                if "sauvegarde" in channel.name.lower():
+                    return channel
+            except Exception:
+                continue
 
         # Créer le rôle everyone avec pas d'accès
         everyone_overwrite = discord.PermissionOverwrite(read_messages=False, send_messages=False)
@@ -120,24 +140,26 @@ async def create_backup_channel(guild: discord.Guild) -> Optional[discord.TextCh
             }
         )
 
-        # Donner l'accès aux rôles admin/modérateurs
+        # Donner l'accès aux rôles fondateur/admin/modérateur s'ils existent
         admin_roles = []
-        
-        # Chercher les rôles stockés en config
         from core_config import CONFIG
-        
-        if "roles" in CONFIG:
-            if CONFIG["roles"].get("admin"):
-                admin_role = guild.get_role(CONFIG["roles"]["admin"])
-                if admin_role:
-                    admin_roles.append(admin_role)
-            if CONFIG["roles"].get("moderator"):
-                mod_role = guild.get_role(CONFIG["roles"]["moderator"])
-                if mod_role:
-                    admin_roles.append(mod_role)
+
+        role_cfg = CONFIG.get("roles", {})
+        for rt in ("founder", "admin", "moderator"):
+            try:
+                rid = role_cfg.get(rt)
+                if rid:
+                    r = guild.get_role(rid)
+                    if r:
+                        admin_roles.append(r)
+            except Exception:
+                continue
 
         for role in admin_roles:
-            await channel.set_permissions(role, read_messages=True, send_messages=False)
+            try:
+                await channel.set_permissions(role, read_messages=True, send_messages=False)
+            except Exception:
+                pass
 
         return channel
 
