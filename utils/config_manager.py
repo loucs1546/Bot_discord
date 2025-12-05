@@ -193,3 +193,88 @@ async def send_missing_config_alert(guild: discord.Guild):
 
     except Exception as e:
         print(f"[ConfigManager] Erreur lors de l'envoi de l'alerte: {e}")
+
+
+async def apply_guild_config(bot: discord.Client, guild: discord.Guild, loaded_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Applique une configuration chargée à la guilde :
+    - Vérifie l'existence des rôles enregistrés
+    - Crée les salons manquants pour les channels/logs
+    - Met à jour et retourne la config finale appliquée
+    """
+    try:
+        from core_config import CONFIG as CORE_CONFIG
+        # Fusionner la configuration chargée dans la config courante
+        CORE_CONFIG.update(loaded_config)
+
+        # --- Traiter les rôles ---
+        roles_cfg = CORE_CONFIG.get("roles", {})
+        for key, rid in list(roles_cfg.items()):
+            try:
+                if rid:
+                    r = guild.get_role(rid)
+                    if not r:
+                        # rôle absent, on le marque None
+                        roles_cfg[key] = None
+                else:
+                    roles_cfg[key] = None
+            except Exception:
+                roles_cfg[key] = None
+
+        # --- Traiter les channels explicitement listés dans CONFIG['channels'] ---
+        channels_cfg = CORE_CONFIG.get("channels", {})
+        for ckey, cid in list(channels_cfg.items()):
+            try:
+                if cid and guild.get_channel(cid):
+                    continue
+                # créer un salon simple si absent
+                name_map = {
+                    "welcome": "bienvenue",
+                    "leave": "adieu",
+                    "rules": "regles",
+                }
+                chan_name = name_map.get(ckey, ckey)
+                # éviter doublons
+                existing = discord.utils.get(guild.text_channels, name=chan_name)
+                if existing:
+                    channels_cfg[ckey] = existing.id
+                else:
+                    new_ch = await guild.create_text_channel(chan_name)
+                    channels_cfg[ckey] = new_ch.id
+            except Exception as e:
+                print(f"[ConfigManager] Erreur création/channel mapping {ckey}: {e}")
+
+        # --- Traiter les logs: créer salons logs si absent ---
+        logs_cfg = CORE_CONFIG.get("logs", {})
+        for lkey, lid in list(logs_cfg.items()):
+            try:
+                if lid and guild.get_channel(lid):
+                    continue
+                # creer channel logs-<lkey>
+                chan_name = f"logs-{lkey}" if lkey else "logs"
+                existing = discord.utils.get(guild.text_channels, name=chan_name)
+                if existing:
+                    logs_cfg[lkey] = existing.id
+                else:
+                    new_ch = await guild.create_text_channel(chan_name)
+                    logs_cfg[lkey] = new_ch.id
+            except Exception as e:
+                print(f"[ConfigManager] Erreur création logs channel {lkey}: {e}")
+
+        # --- Tickets config : assurer counter/options présents ---
+        ticket_cfg = CORE_CONFIG.setdefault("ticket_config", {})
+        ticket_cfg.setdefault("mode", "basic")
+        ticket_cfg.setdefault("options", ticket_cfg.get("options", []))
+        ticket_cfg.setdefault("counter", ticket_cfg.get("counter", 0))
+
+        # Enregistrer la config finale (upload) pour s'assurer que le fichier correspond
+        try:
+            await save_guild_config(guild, CORE_CONFIG)
+        except Exception as e:
+            print(f"[ConfigManager] Erreur lors de la sauvegarde finale: {e}")
+
+        return CORE_CONFIG
+
+    except Exception as e:
+        print(f"[ConfigManager] apply_guild_config erreur: {e}")
+        return loaded_config

@@ -597,9 +597,13 @@ async def on_ready():
             try:
                 loaded_config = await load_guild_config_from_file(guild)
                 if loaded_config:
-                    # Fusionner avec la config existante
-                    config.CONFIG.update(loaded_config)
-                    print(f"✅ Configuration chargée pour {guild.name}")
+                    # Appliquer la config (création salons manquants, mapping rôles)
+                    try:
+                        applied = await apply_guild_config(bot, guild, loaded_config)
+                        config.CONFIG.update(applied)
+                        print(f"✅ Configuration appliquée pour {guild.name}")
+                    except Exception as e:
+                        print(f"❌ Erreur application config pour {guild.name}: {e}")
                 else:
                     # Envoyer une alerte si config non trouvée
                     await send_missing_config_alert(guild)
