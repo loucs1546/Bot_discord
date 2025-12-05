@@ -141,6 +141,6 @@ Le bot est maintenant complet avec:
 • Interfaces utilisateur intuitives
 • Configuration simplifiée
 • 22 commandes pleinement fonctionnelles
-• Documentation exhaustive
+• Documentation exhaustives
 
 ════════════════════════════════════════════════════════════════════════
