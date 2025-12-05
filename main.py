@@ -406,6 +406,55 @@ class TicketManagementView(discord.ui.View):
                 role = interaction.guild.get_role(role_id)
                 if role:
                     high_rank_roles.append(role)
+        # Ajouter également les rôles qui ont les permissions d'administration ou manage_messages
+        for role in interaction.guild.roles:
+            try:
+                if role.permissions.administrator or role.permissions.manage_messages:
+                    if role not in high_rank_roles:
+                        high_rank_roles.append(role)
+            except Exception:
+                continue
+
+        # Sauvegarder la liste des participants (membres et rôles) ayant accès actuellement
+        participants = {"members": [], "roles": []}
+        try:
+            for target, ow in channel.overwrites.items():
+                try:
+                    # Member
+                    if isinstance(target, discord.Member):
+                        if ow.send_messages or ow.read_messages:
+                            participants["members"].append(target.id)
+                    # Role
+                    else:
+                        if ow.send_messages or ow.read_messages:
+                            participants["roles"].append(target.id)
+                except Exception:
+                    continue
+            # S'assurer que le propriétaire (owner) est présent
+            owner_id = getattr(self, 'owner_id', None)
+            if owner_id and owner_id not in participants["members"]:
+                participants["members"].append(owner_id)
+
+            # Stocker dans le topic du channel (suffixe spécial)
+            try:
+                import json as _json
+                marker = "[SEIKO_PARTICIPANTS]"
+                payload = _json.dumps(participants)
+                new_topic = (channel.topic or "") + "\n" + marker + payload
+                await channel.edit(topic=new_topic)
+            except Exception as e:
+                print(f"[Ticket] Impossible d'écrire participants dans topic: {e}")
+        except Exception as e:
+            print(f"[Ticket] Erreur lors de la récupération des overwrites: {e}")
+        
+        # Ensurer que tous les participants perdent le droit d'envoyer des messages (ils seront restaurés au reopen)
+        for member_id in participants.get("members", []):
+            try:
+                m = interaction.guild.get_member(member_id)
+                if m:
+                    await channel.set_permissions(m, send_messages=False, read_messages=True, add_reactions=False)
+            except:
+                pass
         
         # Désactiver toutes les permissions d'envoi sauf pour les hauts gradés
         for role in interaction.guild.roles:
@@ -469,37 +518,59 @@ class TicketManagementView(discord.ui.View):
             except:
                 pass
         
-        # Rétablir les permissions pour TOUS les rôles
-        for role in interaction.guild.roles:
-            if role != interaction.guild.default_role:
+        # Rétablir les permissions uniquement pour les participants sauvegardés
+        # Lire la liste des participants depuis le topic si présent
+        participants = {"members": [], "roles": []}
+        try:
+            if channel.topic and "[SEIKO_PARTICIPANTS]" in channel.topic:
+                marker = "[SEIKO_PARTICIPANTS]"
+                parts = channel.topic.split(marker)
+                # dernier segment contient le JSON
+                json_part = parts[-1].strip()
+                import json as _json
                 try:
-                    await channel.set_permissions(role, send_messages=True, add_reactions=True)
+                    participants = _json.loads(json_part)
+                except Exception:
+                    participants = {"members": [], "roles": []}
+                # Nettoyer le topic en enlevant le marqueur + payload
+                new_topic = marker.join(parts[:-1]).strip()
+                try:
+                    await channel.edit(topic=new_topic if new_topic else None)
                 except:
                     pass
-        
-        # Rétablir pour @everyone aussi
-        try:
-            await channel.set_permissions(
-                interaction.guild.default_role,
-                read_messages=True,
-                send_messages=True,
-                add_reactions=True,
-                attach_files=False,  # Always keep off
-                embed_links=False     # Always keep off
-            )
-        except:
-            pass
-        
+        except Exception as e:
+            print(f"[Ticket] Erreur lecture participants depuis topic: {e}")
+
+        # Restaurer les permissions pour les membres listés
+        for member_id in participants.get("members", []):
+            try:
+                m = interaction.guild.get_member(member_id)
+                if m:
+                    await channel.set_permissions(m, read_messages=True, send_messages=True, add_reactions=True)
+            except:
+                pass
+
+        # Restaurer les permissions pour les rôles listés
+        for role_id in participants.get("roles", []):
+            try:
+                r = interaction.guild.get_role(role_id)
+                if r:
+                    await channel.set_permissions(r, send_messages=True, add_reactions=True)
+            except:
+                pass
+
+        # Ne pas changer les permissions du @everyone (conserver le comportement restreint)
+
         # Désactiver le bouton Réouvrir, activer Fermer
         button.disabled = True
         for btn in self.children:
             if btn.label == "🔒 Fermer":
                 btn.disabled = False
                 break
-        
+
         embed = discord.Embed(
             title="🔓 Ticket Réouvert",
-            description=f"Par {interaction.user.mention}\n\n✅ Tous les participants peuvent à nouveau parler.",
+            description=f"Par {interaction.user.mention}\n\n✅ Les membres du ticket peuvent à nouveau parler.",
             color=0x2ecc71
         )
         await interaction.followup.send(embed=embed)
