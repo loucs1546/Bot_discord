@@ -2,10 +2,8 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Installer les dépendances système nécessaires
-RUN apt-get update && apt-get install -y \
-    libaudioop-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Installer audioop-lts pour Python 3.13
+RUN pip install --no-cache-dir audioop-lts
 
 # Copier les requirements
 COPY requirements.txt .
