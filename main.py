@@ -596,11 +596,6 @@ class TicketChoiceView(discord.ui.View):
             ephemeral=True
         )
 
-# TicketControls est maintenant un alias pour TicketManagementView (compatibilité)
-class TicketControls(TicketManagementView):
-    """Classe de compatibilité - anciennement gérait les tickets"""
-    pass
-
 
 # === EVENT: on_ready ===
 @bot.event
