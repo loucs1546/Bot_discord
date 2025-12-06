@@ -702,15 +702,6 @@ async def self_ping_loop():
 # === COMMANDES DE LOGS ===
 # ============================
 
-@bot.tree.command(name="logs", description="Définit le salon pour un type de log")
-@discord.app_commands.describe(type="Type de log", salon="Salon de destination")
-@discord.app_commands.choices(type=[
-    discord.app_commands.Choice(name="messages", value="messages"),
-    discord.app_commands.Choice(name="moderation", value="moderation"),
-    discord.app_commands.Choice(name="ticket", value="ticket"),
-    discord.app_commands.Choice(name="vocal", value="vocal"),
-    discord.app_commands.Choice(name="securite", value="securite")
-])
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.TextChannel):
     config.CONFIG.setdefault("logs", {})[type] = salon.id
