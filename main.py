@@ -436,7 +436,7 @@ if not existing:
 else:
     print("ℹ️ /ticket-panel déjà enregistrée — enregistrement dynamique ignoré")
 
-# --- SUPPRIMÉ : definition décorée de /ticket-panel (dupliquée) ---
+# --- SUPPRIMÉ : definition décorée redondante de /ticket-panel (dupliquée) ---
 # La commande /ticket-panel est désormais enregistrée de façon programmatique
 # plus haut dans le fichier pour éviter CommandAlreadyRegistered
 
@@ -597,14 +597,49 @@ async def add_cat_log(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
 
+    # chercher une catégorie existante ressemblant à la catégorie de logs
+    found_cat = None
     for category in guild.categories:
-        if "log" in category.name.lower() or "surveillance" in category.name.lower():
-            await interaction.followup.send(
-                f"❌ Une catégorie de logs existe déjà : **{category.name}**",
-                ephemeral=True
-            )
-            return
+        low = category.name.lower()
+        if "surveillance" in low or "surveillances" in low or "surveil" in low or "SURVEILLANCES" in category.name:
+            found_cat = category
+            break
 
+    salon_configs = [
+        ("📜・messages", "messages"),
+        ("🎤・vocal", "vocal"),
+        ("🎫・tickets", "ticket"),
+        ("🛠️・commandes", "commands"),
+        ("👑・rôles", "moderation"),
+        ("📛・profil", "profile"),
+        ("🔍・contenu", "content"),
+        ("🚨・alertes", "alerts"),
+        ("⚖️・sanctions", "sanctions"),
+        ("🎉・giveaway", "giveaway"),
+        ("💥・bavures", "bavures")
+    ]
+
+    # si on trouve une catégorie, tenter de mapper ses salons existants vers les clés
+    if found_cat:
+        channel_ids = {}
+        names_to_keys = {key: display for (display, key) in salon_configs}
+        for c in found_cat.channels:
+            cname = c.name.lower()
+            for display, key in salon_configs:
+                # match si le nom du salon contient la clé (ex: "messages") ou le libellé simplifié
+                if key in cname or ''.join(ch for ch in display.lower() if ch.isalnum()) in ''.join(ch for ch in cname if ch.isalnum()):
+                    channel_ids[key] = c.id
+        if channel_ids:
+            if not isinstance(config.CONFIG, dict):
+                config.CONFIG = {}
+            config.CONFIG.setdefault("logs", {})
+            config.CONFIG["logs"].update(channel_ids)
+            found_list = ", ".join(f"{k}: <#{v}>" for k, v in channel_ids.items())
+            await interaction.followup.send(f"✅ Catégorie existante utilisée : **{found_cat.name}**. Salons mappés : {found_list}", ephemeral=True)
+            return
+        # sinon continuer vers la création (aucun salon pertinent trouvé)
+
+    # création classique si aucune catégorie trouvée ou aucun salon pertinent
     try:
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -616,26 +651,12 @@ async def add_cat_log(interaction: discord.Interaction):
             overwrites=overwrites
         )
 
-        salon_configs = [
-            ("📜・messages", "messages"),
-            ("🎤・vocal", "vocal"),
-            ("🎫・tickets", "ticket"),
-            ("🛠️・commandes", "commands"),
-            ("👑・rôles", "moderation"),
-            ("📛・profil", "profile"),
-            ("🔍・contenu", "content"),
-            ("🚨・alertes", "alerts"),
-            ("⚖️・sanctions", "sanctions"),
-            ("🎉・giveaway", "giveaway"),
-            ("💥・bavures", "bavures")
-        ]
-
         channel_ids = {}
         for name, key in salon_configs:
             log_overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(
-                    read_messages=True, 
+                    read_messages=True,
                     send_messages=True,
                     manage_messages=True
                 )
@@ -1130,7 +1151,8 @@ async def save_cmd(interaction: discord.Interaction):
 @discord.app_commands.describe(salon="Salon contenant la sauvegarde (choix via autocomplete)")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
-    """Recherche dans le salon donné une sauvegarde (fichier .json ou JSON dans le message) et la charge."""
+    """Recherche dans le salon donné une sauvegarde (fichier .json ou JSON dans le message) et la charge.
+    NB: n'applique pas de création de rôles/salons — la configuration est simplement chargée en mémoire et sauvegardée."""
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
 
@@ -1139,7 +1161,7 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
 
     try:
         async for msg in salon.history(limit=300):
-            # 1) vérifier les pièces jointes
+            # pièces jointes JSON
             for att in msg.attachments:
                 name = (att.filename or "").lower()
                 if name.endswith(".json"):
@@ -1154,11 +1176,10 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
             if loaded_config:
                 break
 
-            # 2) essayer de parser du JSON dans le contenu du message
+            # JSON brute dans le message
             if msg.content and ("{" in msg.content and "}" in msg.content):
                 try:
                     import json, re
-                    # extraire premier bloc JSON basique
                     m = re.search(r"(\{.*\})", msg.content, re.S)
                     if m:
                         candidate = m.group(1)
@@ -1172,45 +1193,26 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
             await interaction.followup.send(f"❌ Aucune sauvegarde JSON trouvée dans {salon.mention}.", ephemeral=True)
             return
 
-        # Tenter d'appliquer la configuration si la fonction existe dans utils.config_manager
-        applied = None
-        try:
-            apply_fn = getattr(config_manager, "apply_guild_config", None)
-            if apply_fn:
-                # si c'est coroutine ou fonction sync, gérer les deux cas
-                if asyncio.iscoroutinefunction(apply_fn):
-                    applied = await apply_fn(bot, guild, loaded_config)
-                else:
-                    applied = apply_fn(bot, guild, loaded_config)
-            else:
-                # Pas d'apply disponible : on met simplement à jour la config en mémoire
-                config.CONFIG.update(loaded_config)
-                applied = loaded_config
-        except Exception as e:
-            await interaction.followup.send(f"⚠️ La sauvegarde a été chargée mais l'application automatique a échoué : {e}", ephemeral=True)
-            # continuer : on sauvegarde quand même la donnée brute
-            config.CONFIG.update(loaded_config)
-            applied = loaded_config
+        # Ne PAS appeler apply_guild_config ici (pour éviter création de salons/roles).
+        # On met à jour la configuration en mémoire et on la sauvegarde.
+        config.CONFIG.update(loaded_config)
 
-        # Sauvegarder la configuration via la fonction existante
         try:
             await save_guild_config(guild, config.CONFIG)
         except Exception:
             pass
 
-        # Préparer résumé succinct
-        keys = ", ".join(sorted(list(applied.keys()))) if isinstance(applied, dict) else "données non structurées"
+        keys = ", ".join(sorted(list(loaded_config.keys()))) if isinstance(loaded_config, dict) else "données non structurées"
         summary = (
             f"✅ Sauvegarde chargée depuis {salon.mention}.\n"
             f"🔎 Message source : <@{source_msg.author.id}> (ID: {source_msg.id})\n"
             f"🗂️ Clés détectées : {keys}\n"
-            f"💾 Configuration mise à jour en mémoire et sauvegardée."
+            f"💾 Configuration mise à jour en mémoire et sauvegardée (sans créer de salons/roles)."
         )
         await interaction.followup.send(summary, ephemeral=True)
 
-        # Envoyer un log informatif
         try:
-            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.utcnow())
+            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde chargée pour `{guild.name}` depuis {salon.mention} (sans appliquer les ressources)", color=0x2ecc71, timestamp=datetime.utcnow())
             await send_log_to(bot, "commands", embed)
         except Exception:
             pass
