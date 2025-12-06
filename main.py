@@ -705,6 +705,10 @@ async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(f"🏓 Pong ! Latence : **{latency} ms**", ephemeral=True)
 
+# *** DUPLIQUÉS SUPPRIMÉS CI-DESSOUS ***
+# Les occurrences supplémentaires de la commande /ping ont été retirées pour éviter
+# discord.app_commands.errors.CommandAlreadyRegistered: Command 'ping' already registered.
+# Si vous voyez d'autres blocs `@bot.tree.command(name="ping", ...)` plus bas, supprimez-les.
 
 # ============================
 # === COMMANDES DE LOGS ===
@@ -1245,5 +1249,107 @@ async def about(interaction: discord.Interaction):
 @bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
 async def invite(interaction: discord.Interaction):
     await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
+
+# === START SETUP ===
+class StartSetupView(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
+
+    @discord.ui.button(label="🎓 Rôle de base", style=discord.ButtonStyle.primary)
+    async def base_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Sélectionnez le rôle de base à attribuer aux nouveaux membres :",
+            view=RoleSelectView(self.guild, "default"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="👑 Rôle Admin", style=discord.ButtonStyle.primary)
+    async def admin_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Sélectionnez le rôle Admin :",
+            view=RoleSelectView(self.guild, "admin"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="🛡️ Rôle Modérateur", style=discord.ButtonStyle.primary)
+    async def mod_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Sélectionnez le rôle Modérateur :",
+            view=RoleSelectView(self.guild, "moderator"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="🎯 Rôle Fondateur", style=discord.ButtonStyle.primary)
+    async def founder_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Sélectionnez le rôle Fondateur :",
+            view=RoleSelectView(self.guild, "founder"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="💬 Salon Bienvenue", style=discord.ButtonStyle.success)
+    async def welcome_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Sélectionnez le salon de bienvenue :",
+            view=ChannelSelectView(self.guild, "welcome"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="👋 Salon Adieu", style=discord.ButtonStyle.danger)
+    async def leave_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Sélectionnez le salon d'adieu :",
+            view=ChannelSelectView(self.guild, "leave"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="🎟️ Configurer Tickets", style=discord.ButtonStyle.secondary)
+    async def tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Configurer les systèmes de tickets :",
+            view=TicketMultiConfigView(),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="✅ Terminer & Sauvegarder", style=discord.ButtonStyle.success)
+    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            backup_ch = await create_backup_channel(self.guild)
+            try:
+                await save_guild_config(self.guild, config.CONFIG)
+            except Exception:
+                pass
+            msg = "✅ Setup terminé. Configuration sauvegardée."
+            if backup_ch:
+                msg += f" Backup dans {backup_ch.mention}."
+            await interaction.followup.send(msg, ephemeral=True)
+            # envoyer guide si disponible
+            try:
+                if self.source_channel:
+                    file_path = Path('POUR_TOI.txt')
+                    if file_path.exists():
+                        await self.source_channel.send(file=discord.File(str(file_path), filename='POUR_TOI.txt'))
+            except Exception:
+                pass
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur lors de la finalisation: {e}", ephemeral=True)
+
+
+# Réintroduit la commande /start
+@bot.tree.command(name="start", description="Tutoriel de configuration du serveur")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def start_setup(interaction: discord.Interaction):
+    """Démarre l'assistant de configuration (rôles, salons, tickets)."""
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(
+        title="🎓 Setup Seiko - Assistant de configuration",
+        description="Utilisez les boutons pour configurer rapidement les rôles, salons et tickets.",
+        color=0x3498db
+    )
+    view = StartSetupView(interaction.guild, interaction.channel)
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 bot.run(config.DISCORD_TOKEN)
