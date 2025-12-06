@@ -166,45 +166,6 @@ class RoleSelectView(discord.ui.View):
 
         self.add_item(BackButton())
 
-        # Bouton de recherche (fallback si la liste est tronquée ou pour rechercher par nom/ID)
-        class SearchRoleButton(discord.ui.Button):
-            def __init__(self):
-                super().__init__(label="🔎 Rechercher", style=discord.ButtonStyle.secondary)
-
-            async def callback(inner_self, interaction: discord.Interaction):
-                role_type_local = self.role_type  # capture pour le modal
-
-                class RoleModal(discord.ui.Modal, title="Rechercher un rôle"):
-                    query = discord.ui.TextInput(label="Mention / ID / Nom du rôle", placeholder="@Role ou 123... ou Nom du rôle", max_length=100)
-
-                    async def on_submit(self, modal_interaction: discord.Interaction):
-                        val = self.query.value.strip()
-                        g = modal_interaction.guild
-                        role = None
-                        # essayer ID
-                        if val.isdigit():
-                            role = g.get_role(int(val))
-                        else:
-                            m = re.search(r"<@&(\d{17,20})>", val)
-                            if m:
-                                role = g.get_role(int(m.group(1)))
-                        # sinon rechercher par nom (insensible)
-                        if not role:
-                            for r in g.roles:
-                                if r.name.lower() == val.lower():
-                                    role = r
-                                    break
-                        if not role:
-                            await modal_interaction.response.send_message("❌ Rôle introuvable.", ephemeral=True)
-                            return
-                        # appliquer en utilisant la valeur capturée
-                        config.CONFIG.setdefault("roles", {})[role_type_local] = role.id
-                        await modal_interaction.response.send_message(f"✅ Rôle {role_type_local} défini : <@&{role.id}>", ephemeral=True)
-
-                await interaction.response.send_modal(RoleModal())
-
-        self.add_item(SearchRoleButton())
-
 
 class ChannelSelectView(discord.ui.View):
     def __init__(self, guild: discord.Guild, channel_type: str, next_view_factory: callable = None, back_view_factory: callable = None):
@@ -247,43 +208,6 @@ class ChannelSelectView(discord.ui.View):
 
         self.add_item(BackButton())
 
-        # Bouton de recherche (fallback si la liste est tronquée ou pour rechercher par nom/ID)
-        class SearchChannelButton(discord.ui.Button):
-            def __init__(self):
-                super().__init__(label="🔎 Rechercher", style=discord.ButtonStyle.secondary)
-
-            async def callback(inner_self, interaction: discord.Interaction):
-                channel_type_local = self.channel_type  # capture pour le modal
-
-                class ChannelModal(discord.ui.Modal, title="Rechercher un salon"):
-                    query = discord.ui.TextInput(label="Mention / ID / Nom du salon", placeholder="#salon ou 123... ou nom", max_length=100)
-
-                    async def on_submit(self, modal_interaction: discord.Interaction):
-                        val = self.query.value.strip()
-                        g = modal_interaction.guild
-                        ch = None
-                        # ID
-                        if val.isdigit():
-                            ch = g.get_channel(int(val))
-                        else:
-                            m = re.search(r"<#(\d{17,20})>", val)
-                            if m:
-                                ch = g.get_channel(int(m.group(1)))
-                        if not ch:
-                            for c in g.channels:
-                                if c.name.lower() == val.lower():
-                                    ch = c
-                                    break
-                        if not ch:
-                            await modal_interaction.response.send_message("❌ Salon introuvable.", ephemeral=True)
-                            return
-                        config.CONFIG.setdefault("channels", {})[channel_type_local] = ch.id
-                        await modal_interaction.response.send_message(f"✅ Salon {channel_type_local} défini : <#{ch.id}>", ephemeral=True)
-
-                await interaction.response.send_modal(ChannelModal())
-
-        self.add_item(SearchChannelButton())
-
 
 class LogChannelSelectView(discord.ui.View):
     def __init__(self, guild: discord.Guild, log_type: str):
@@ -316,129 +240,318 @@ class TicketChoiceSelect(discord.ui.Select):
             max_values=1
         )
         self.guild = guild
-
+    
     async def callback(self, interaction: discord.Interaction):
-        # stocker la sélection dans la view parente et ack
-        try:
-            parent = self.view
-            if parent is None:
-                # si appelé hors contexte, répondre éphémère
-                await interaction.response.send_message(f"✅ Sélection : {self.values[0]}", ephemeral=True)
+        # On va stocker le choix et afficher le bouton "Créer"
+        pass
+
+
+class TicketChoiceView(discord.ui.View):
+    """Interface pour choisir le type de ticket avant création"""
+    def __init__(self, guild: discord.Guild):
+        super().__init__(timeout=300)
+        self.guild = guild
+        self.selected_option = None
+        
+        # Ajouter le Select menu
+        select = TicketChoiceSelect(guild)
+        
+        # Override le callback pour stocker la sélection
+        async def select_callback(interaction: discord.Interaction):
+            self.selected_option = select.values[0]
+            await interaction.response.defer()
+        
+        select.callback = select_callback
+        self.add_item(select)
+    
+    @discord.ui.button(label="📩 Créer le Ticket", style=discord.ButtonStyle.success)
+    async def create_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_option:
+            await interaction.response.send_message("❌ Sélectionnez un type de ticket d'abord.", ephemeral=True)
+            return
+        
+        guild = self.guild or interaction.guild
+        user = interaction.user
+        
+        # Vérifier qu'il n'a pas déjà un ticket
+        for channel in guild.channels:
+            if channel.name.startswith("ticket-") and str(user.id) in channel.name:
+                await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
                 return
-            parent.selected_option = self.values[0]
-            # petit feedback discret
-            await interaction.response.send_message(f"✅ Sélection : **{self.values[0]}** (prête à être créée)", ephemeral=True)
+        
+        # Incrémenter le counter
+        config.CONFIG.setdefault("ticket_config", {}).setdefault("counter", 0)
+        ticket_num = config.CONFIG["ticket_config"]["counter"] + 1
+        config.CONFIG["ticket_config"]["counter"] = ticket_num
+        
+        # Créer le channel ticket-XXXXXX
+        ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
+        
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(
+                read_messages=True, 
+                send_messages=True, 
+                attach_files=False, 
+                embed_links=False
+            ),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+        }
+        
+        try:
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                overwrites=overwrites,
+                reason=f"Ticket créé par {user} ({self.selected_option})"
+            )
         except Exception as e:
-            await interaction.response.send_message("❌ Erreur en traitant la sélection.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
+            return
+        
+        # Envoyer le message du bot avec les boutons de gestion
+        embed = discord.Embed(
+            title=f"🎟️ {self.selected_option} - #{ticket_num:06d}",
+            description=f"Bonjour {user.mention},\n\n📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n\n> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.",
+            color=0x5865F2,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="Seiko Security • Système de tickets")
+        
+        view = TicketManagementView(user.id, ticket_num)
+        msg = await ticket_channel.send(embed=embed, view=view)
+        
+        # Log
+        log_embed = discord.Embed(
+            title="🎟️ Ticket créé",
+            description=f"**Utilisateur** : {user.mention} (`{user}`)\n**Type** : {self.selected_option}\n**Ticket** : {ticket_channel.mention}",
+            color=0x00ff00,
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=user.display_avatar.url)
+        await send_log_to(bot, "ticket", log_embed)
+        
+        await interaction.response.send_message(
+            f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{self.selected_option}**",
+            ephemeral=True
+        )
 
-# Nouvelle view : TicketPanelView → panel unique contenant select + create
-class TicketPanelView(discord.ui.View):
-	def __init__(self, guild: discord.Guild):
-		super().__init__(timeout=None)
-		self.guild = guild
-		self.selected_option = None
 
-		mode = config.CONFIG.get("ticket_config", {}).get("mode", "basic")
-		options = config.CONFIG.get("ticket_config", {}).get("options", [])
+class TicketManagementView(discord.ui.View):
+    """Boutons de gestion du ticket (Claim, Close, Reopen, Delete)"""
+    def __init__(self, owner_id: int, ticket_num: int = None):
+        super().__init__(timeout=None)
+        self.owner_id = owner_id
+        self.ticket_num = ticket_num
+        self.is_closed = False
+    
+    @discord.ui.button(label="👤 Claim", style=discord.ButtonStyle.primary, emoji="✋", custom_id="ticket_claim")
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Claim = Clear tous les messages sauf le premier du bot"""
+        if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        channel = interaction.channel
+        
+        # Récupérer tous les messages
+        messages_to_delete = []
+        first = True
+        async for msg in channel.history(limit=None, oldest_first=True):
+            if first and msg.author == interaction.client.user:
+                first = False
+                continue
+            messages_to_delete.append(msg)
+        
+        # Supprimer (par batch pour éviter rate limit)
+        deleted_count = 0
+        for msg in messages_to_delete:
+            try:
+                await msg.delete()
+                deleted_count += 1
+            except:
+                pass
+        
+        embed = discord.Embed(
+            title="✅ Ticket Claimed",
+            description=f"Par {interaction.user.mention}\n🗑️ {deleted_count} messages supprimés",
+            color=0x2ecc71
+        )
+        await interaction.followup.send(embed=embed)
+    @discord.ui.button(label="🛠️ Prendre en charge", style=discord.ButtonStyle.secondary, emoji="🛠️", custom_id="ticket_take")
+    async def take_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Prendre en charge = signale que le staff prend en charge la demande"""
+        # Autorisé seulement pour fondateur/admin/modérateur
+        allowed = False
+        # rôles définis dans la config
+        role_ids = [config.CONFIG.get("roles", {}).get(k) for k in ("founder", "admin", "moderator")]
+        role_ids = [rid for rid in role_ids if rid]
+        for role in interaction.user.roles:
+            if role.id in role_ids or role.permissions.administrator or role.permissions.manage_messages:
+                allowed = True
+                break
+        if not allowed:
+            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
+            return
 
-		# Si advanced, ajouter le select (limité à 25 par Discord)
-		if mode != "basic":
-			select = TicketChoiceSelect(guild)
-			# override callback via la classe TicketChoiceSelect définie plus haut
-			self.add_item(select)
+        await interaction.response.defer()
+        # Envoyer un message public dans le ticket
+        try:
+            await interaction.channel.send(f"✅ {interaction.user.mention} prend en charge votre demande.")
+            await interaction.followup.send("✅ Vous avez pris en charge le ticket.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur: {e}", ephemeral=True)
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, emoji="❌", custom_id="ticket_delete")
+    async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Delete = Supprimer le canal avec confirmation"""
+        if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
+            return
+        
+        # Confirmation
+        embed = discord.Embed(
+            title="⚠️ Confirmer la suppression",
+            description="Ce ticket va être supprimé **définitivement** dans 5 secondes.\nCliquez sur ✅ pour confirmer ou ❌ pour annuler.",
+            color=0xe74c3c
+        )
+        
+        class ConfirmDeleteView(discord.ui.View):
+            def __init__(self, ticket_channel, owner_id=None, ticket_num=None):
+                super().__init__(timeout=5)
+                self.ticket_channel = ticket_channel
+                self.owner_id = owner_id
+                self.ticket_num = ticket_num
+            
+            @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
+            async def confirm_delete(self, confirm_interaction: discord.Interaction, confirm_button: discord.ui.Button):
+                await confirm_interaction.response.defer()
+                # Envoyer un récap/log avant suppression
+                try:
+                    owner = None
+                    owner_id = getattr(self, 'owner_id', None)
+                    if owner_id:
+                        owner = confirm_interaction.guild.get_member(owner_id)
 
-		# Bouton créer (présent dans tous les modes)
-		@discord.ui.button(label="📩 Créer le Ticket", style=discord.ButtonStyle.success)
-		async def create_button(interaction: discord.Interaction, button: discord.ui.Button):
-			# déterminer option
-			selected = self.selected_option
-			if mode == "basic":
-				selected = options[0] if options else "Support Général"
-			if not selected:
-				await interaction.response.send_message("❌ Sélectionnez un type de ticket d'abord.", ephemeral=True)
-				return
+                    embed_del = discord.Embed(
+                        title="🗑️ Ticket supprimé",
+                        description=f"**Salon**: {self.ticket_channel.name}\n**Supprimé par**: {confirm_interaction.user.mention}",
+                        color=0xe74c3c,
+                        timestamp=datetime.utcnow()
+                    )
+                    if owner:
+                        embed_del.add_field(name="Propriétaire", value=f"{owner.mention} (`{owner}`)")
+                    if getattr(self, 'ticket_num', None):
+                        embed_del.set_footer(text=f"Ticket #{int(self.ticket_num):06d}")
 
-			guild = interaction.guild
-			user = interaction.user
+                    await send_log_to(bot, "ticket", embed_del)
+                except Exception:
+                    pass
 
-			# Vérifier ticket existant
-			for channel in guild.channels:
-				if channel.name.startswith("ticket-") and str(user.id) in channel.name:
-					await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
-					return
+                try:
+                    await self.ticket_channel.delete()
+                except Exception:
+                    pass
+            
+            @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
+            async def cancel_delete(self, cancel_interaction: discord.Interaction, cancel_button: discord.ui.Button):
+                await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=True)
+        
+        await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=True)
 
-			# Incrémenter le counter
-			config.CONFIG.setdefault("ticket_config", {}).setdefault("counter", 0)
-			ticket_num = config.CONFIG["ticket_config"]["counter"] + 1
-			config.CONFIG["ticket_config"]["counter"] = ticket_num
 
-			ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
-			overwrites = {
-				guild.default_role: discord.PermissionOverwrite(read_messages=False),
-				user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=False, embed_links=False),
-				guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
-			}
+# TicketView REFACTORISÉE - Utilise TicketChoiceView
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-			try:
-				ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites, reason=f"Ticket créé par {user} ({selected})")
-			except Exception as e:
-				await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
-				return
+    @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id="create_ticket")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        user = interaction.user
+        
+        # Vérifier qu'il n'a pas déjà un ticket
+        for channel in guild.channels:
+            if channel.name.startswith("ticket-") and str(user.id) in channel.name:
+                await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
+                return
 
-			embed = discord.Embed(title=f"🎟️ {selected} - #{ticket_num:06d}", description=f"{user.mention}, décrivez votre demande.", color=0x5865F2, timestamp=datetime.utcnow())
-			view = TicketManagementView(user.id, ticket_num)
-			await ticket_channel.send(embed=embed, view=view)
+        # Si le mode est 'basic', créer directement le ticket sans choix
+        mode = config.CONFIG.get("ticket_config", {}).get("mode", "basic")
+        options = config.CONFIG.get("ticket_config", {}).get("options", [])
+        if mode == "basic":
+            selected_option = options[0] if options else "Support Général"
 
-			# log
-			try:
-				log_embed = discord.Embed(title="🎟️ Ticket créé", description=f"**Utilisateur** : {user.mention}\n**Type** : {selected}\n**Ticket** : {ticket_channel.mention}", color=0x00ff00, timestamp=datetime.utcnow())
-				await send_log_to(bot, "ticket", log_embed)
-			except Exception:
-				pass
+            # Incrémenter le counter
+            config.CONFIG.setdefault("ticket_config", {}).setdefault("counter", 0)
+            ticket_num = config.CONFIG["ticket_config"]["counter"] + 1
+            config.CONFIG["ticket_config"]["counter"] = ticket_num
 
-			await interaction.response.send_message(f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{selected}**", ephemeral=True)
+            # Créer le channel ticket-XXXXXX
+            ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                user: discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True,
+                    attach_files=False,
+                    embed_links=False
+                ),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+            }
 
-		# attacher le bouton créé dynamiquement à la view
-		# (decorator a déjà lié la fonction ci-dessus)
-		# nothing else here
+            try:
+                ticket_channel = await guild.create_text_channel(
+                    name=ticket_name,
+                    overwrites=overwrites,
+                    reason=f"Ticket créé par {user} ({selected_option})"
+                )
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
+                return
 
-# --- Remplacement : enregistrement programmatique et conditionnel de la commande /ticket-panel ---
-# (évite CommandAlreadyRegistered si la commande existe déjà)
+            # Envoyer le message du bot avec les boutons de gestion
+            embed = discord.Embed(
+                title=f"🎟️ {selected_option} - #{ticket_num:06d}",
+                description=f"Bonjour {user.mention},\n\n📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n\n> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.",
+                color=0x5865F2,
+                timestamp=datetime.utcnow()
+            )
+            embed.set_footer(text="Seiko Security • Système de tickets")
 
-async def _ticket_panel_impl(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🎟️ Support - Créer un ticket",
-        description="Sélectionnez le type puis cliquez sur 'Créer le Ticket'.\n> ⚠️ Abuse = Sanction",
-        color=0x2f3136,
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_footer(text="Seiko Security • Système sécurisé")
-    await interaction.channel.send(embed=embed, view=TicketPanelView(interaction.guild))
-    await interaction.response.send_message("✅ Panneau de tickets envoyé.", ephemeral=True)
+            view = TicketManagementView(user.id, ticket_num)
+            await ticket_channel.send(embed=embed, view=view)
 
-# Créer l'objet Command et l'ajouter seulement s'il n'existe pas encore
-try:
-    existing = bot.tree.get_command("ticket-panel")
-except Exception:
-    existing = None
+            # Log
+            log_embed = discord.Embed(
+                title="🎟️ Ticket créé",
+                description=f"**Utilisateur** : {user.mention} (`{user}`)\n**Type** : {selected_option}\n**Ticket** : {ticket_channel.mention}",
+                color=0x00ff00,
+                timestamp=datetime.utcnow()
+            )
+            log_embed.set_thumbnail(url=user.display_avatar.url)
+            await send_log_to(bot, "ticket", log_embed)
 
-if not existing:
-    cmd = discord.app_commands.Command(
-        name="ticket-panel",
-        description="Envoie le panneau de création de ticket",
-        callback=_ticket_panel_impl
-    )
-    try:
-        bot.tree.add_command(cmd)
-        print("✅ Commande /ticket-panel enregistrée dynamiquement")
-    except Exception as e:
-        print(f"❌ Échec ajout commande /ticket-panel dynamiquement: {e}")
-else:
-    print("ℹ️ /ticket-panel déjà enregistrée — enregistrement dynamique ignoré")
+            await interaction.response.send_message(
+                f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{selected_option}**",
+                ephemeral=True
+            )
+            return
 
-# --- SUPPRIMÉ : definition décorée redondante de /ticket-panel (dupliquée) ---
-# La commande /ticket-panel est désormais enregistrée de façon programmatique
-# plus haut dans le fichier pour éviter CommandAlreadyRegistered
+        # Sinon afficher l'interface de choix
+        embed = discord.Embed(
+            title="🎟️ Créer un Ticket",
+            description="Sélectionnez le type de ticket et cliquez sur 'Créer le Ticket'",
+            color=0x5865F2
+        )
+        await interaction.response.send_message(embed=embed, view=TicketChoiceView(guild), ephemeral=True)
+
+
+# TicketControls est maintenant un alias pour TicketManagementView (compatibilité)
+class TicketControls(TicketManagementView):
+    """Classe de compatibilité - anciennement gérait les tickets"""
+    pass
+
 
 # === EVENT: on_ready ===
 @bot.event
@@ -597,49 +710,14 @@ async def add_cat_log(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
 
-    # chercher une catégorie existante ressemblant à la catégorie de logs
-    found_cat = None
     for category in guild.categories:
-        low = category.name.lower()
-        if "surveillance" in low or "surveillances" in low or "surveil" in low or "SURVEILLANCES" in category.name:
-            found_cat = category
-            break
-
-    salon_configs = [
-        ("📜・messages", "messages"),
-        ("🎤・vocal", "vocal"),
-        ("🎫・tickets", "ticket"),
-        ("🛠️・commandes", "commands"),
-        ("👑・rôles", "moderation"),
-        ("📛・profil", "profile"),
-        ("🔍・contenu", "content"),
-        ("🚨・alertes", "alerts"),
-        ("⚖️・sanctions", "sanctions"),
-        ("🎉・giveaway", "giveaway"),
-        ("💥・bavures", "bavures")
-    ]
-
-    # si on trouve une catégorie, tenter de mapper ses salons existants vers les clés
-    if found_cat:
-        channel_ids = {}
-        names_to_keys = {key: display for (display, key) in salon_configs}
-        for c in found_cat.channels:
-            cname = c.name.lower()
-            for display, key in salon_configs:
-                # match si le nom du salon contient la clé (ex: "messages") ou le libellé simplifié
-                if key in cname or ''.join(ch for ch in display.lower() if ch.isalnum()) in ''.join(ch for ch in cname if ch.isalnum()):
-                    channel_ids[key] = c.id
-        if channel_ids:
-            if not isinstance(config.CONFIG, dict):
-                config.CONFIG = {}
-            config.CONFIG.setdefault("logs", {})
-            config.CONFIG["logs"].update(channel_ids)
-            found_list = ", ".join(f"{k}: <#{v}>" for k, v in channel_ids.items())
-            await interaction.followup.send(f"✅ Catégorie existante utilisée : **{found_cat.name}**. Salons mappés : {found_list}", ephemeral=True)
+        if "log" in category.name.lower() or "surveillance" in category.name.lower():
+            await interaction.followup.send(
+                f"❌ Une catégorie de logs existe déjà : **{category.name}**",
+                ephemeral=True
+            )
             return
-        # sinon continuer vers la création (aucun salon pertinent trouvé)
 
-    # création classique si aucune catégorie trouvée ou aucun salon pertinent
     try:
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -651,12 +729,26 @@ async def add_cat_log(interaction: discord.Interaction):
             overwrites=overwrites
         )
 
+        salon_configs = [
+            ("📜・messages", "messages"),
+            ("🎤・vocal", "vocal"),
+            ("🎫・tickets", "ticket"),
+            ("🛠️・commandes", "commands"),
+            ("👑・rôles", "moderation"),
+            ("📛・profil", "profile"),
+            ("🔍・contenu", "content"),
+            ("🚨・alertes", "alerts"),
+            ("⚖️・sanctions", "sanctions"),
+            ("🎉・giveaway", "giveaway"),
+            ("💥・bavures", "bavures")
+        ]
+
         channel_ids = {}
         for name, key in salon_configs:
             log_overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(
-                    read_messages=True,
+                    read_messages=True, 
                     send_messages=True,
                     manage_messages=True
                 )
@@ -1043,8 +1135,336 @@ class TicketConfigView(discord.ui.View):
                 print(f"[TicketConfig] Erreur envoi POUR_TOI.txt: {e}")
 
 
-# === AJOUT : VUES DE SETUP (Étapes pour la commande /start) ===
+@bot.tree.command(name="ticket-panel", description="Envoie le panneau de création de ticket")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def ticket_panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🎟️ Support - Créer un ticket",
+        description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket avec l'équipe.\n\n> ⚠️ **Abuse = Sanction**",
+        color=0x2f3136,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_footer(text="Seiko Security • Système sécurisé")
+    await interaction.channel.send(embed=embed, view=TicketView())
+    await interaction.response.send_message("✅ Pannel de tickets envoyé.", ephemeral=True)
+
+
+@bot.tree.command(name="add-user", description="Ajoute un utilisateur au ticket courant")
+@discord.app_commands.describe(member="Membre à ajouter au ticket")
+@discord.app_commands.checks.has_permissions(manage_channels=True)
+async def add_user(interaction: discord.Interaction, member: discord.Member):
+    guild = interaction.guild
+    channel = interaction.channel
+    if not channel.name.startswith("ticket-") and not channel.name.startswith("close-"):
+        await interaction.response.send_message("❌ Cette commande ne peut être utilisée que dans un ticket.", ephemeral=True)
+        return
+
+    try:
+        await channel.set_permissions(member, read_messages=True, send_messages=True, add_reactions=True, attach_files=False, embed_links=False)
+        await interaction.response.send_message(f"✅ {member.mention} ajouté au ticket.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erreur: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="remove-user", description="Retire un utilisateur du ticket courant")
+@discord.app_commands.describe(member="Membre à retirer du ticket")
+@discord.app_commands.checks.has_permissions(manage_channels=True)
+async def remove_user(interaction: discord.Interaction, member: discord.Member):
+    guild = interaction.guild
+    channel = interaction.channel
+    if not channel.name.startswith("ticket-") and not channel.name.startswith("close-"):
+        await interaction.response.send_message("❌ Cette commande ne peut être utilisée que dans un ticket.", ephemeral=True)
+        return
+
+    try:
+        # Retirer l'accès
+        await channel.set_permissions(member, read_messages=False, send_messages=False, add_reactions=False)
+        await interaction.response.send_message(f"✅ {member.mention} retiré du ticket.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erreur: {e}", ephemeral=True)
+
+
+# ============================
+# === VIEWS POUR CONFIG ===
+# ============================
+
+class ConfigMainView(discord.ui.View):
+    def __init__(self, guild: discord.Guild = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+
+    @discord.ui.button(label="📋 Rôles & Salons", style=discord.ButtonStyle.blurple)
+    async def roles_salons(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="📋 Rôles & Salons",
+            description="Configurez les rôles et salons importants",
+            color=0x2ecc71
+        )
+        guild = self.guild or interaction.guild
+        await interaction.response.edit_message(embed=embed, view=RolesSalonsView(guild))
+
+    @discord.ui.button(label="📊 Logs", style=discord.ButtonStyle.green)
+    async def logs_config(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="📊 Configuration des Logs",
+            description="Définissez les salons de logs",
+            color=0x3498db
+        )
+        await interaction.response.edit_message(embed=embed, view=LogsConfigView(interaction.client, interaction.guild))
+
+    @discord.ui.button(label="🛡️ Sécurité", style=discord.ButtonStyle.danger)
+    async def security(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🛡️ Sécurité",
+            description="Activez/désactivez les protections",
+            color=0xe74c3c
+        )
+        await interaction.response.edit_message(embed=embed, view=SecurityConfigView())
+
+    @discord.ui.button(label="✅ Terminer", style=discord.ButtonStyle.success)
+    async def finish_and_send_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Terminer la configuration (ne pas afficher le guide ici)."""
+        await interaction.response.send_message("✅ Configuration enregistrée. Le guide et la sauvegarde sont disponibles dans le salon privé de sauvegarde.", ephemeral=True)
+
+
+class RolesSalonsView(discord.ui.View):
+    def __init__(self, guild: discord.Guild):
+        super().__init__(timeout=600)
+        self.guild = guild
+
+    @discord.ui.button(label="🎫 Rôle de Base", style=discord.ButtonStyle.primary)
+    async def set_default_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎫 Rôle de Base à l'Arrivée",
+            description="Choisissez le rôle de base dans la liste",
+            color=0x9b59b6
+        )
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "default", next_view_factory=lambda g: RolesSalonsView(g)))
+
+    @discord.ui.button(label="👑 Rôle Admin", style=discord.ButtonStyle.primary)
+    async def set_admin_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="👑 Sélectionner le Rôle Admin",
+            description="Choisissez le rôle dans la liste",
+            color=0x2ecc71
+        )
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "admin", next_view_factory=lambda g: RolesSalonsView(g)))
+
+    @discord.ui.button(label="🛡️ Rôle Modérateur", style=discord.ButtonStyle.primary)
+    async def set_mod_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🛡️ Sélectionner le Rôle Modérateur",
+            description="Choisissez le rôle dans la liste",
+            color=0x3498db
+        )
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "moderator", next_view_factory=lambda g: RolesSalonsView(g)))
+
+    @discord.ui.button(label="🎯 Rôle Fondateur", style=discord.ButtonStyle.primary)
+    async def set_founder_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎯 Sélectionner le Rôle Fondateur",
+            description="Choisissez le rôle dans la liste",
+            color=0xe74c3c
+        )
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "founder", next_view_factory=lambda g: RolesSalonsView(g)))
+
+    @discord.ui.button(label="👋 Bienvenue/Adieu", style=discord.ButtonStyle.success)
+    async def set_welcome_leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="👋 Salons Bienvenue/Adieu",
+            description="Sélectionnez les salons",
+            color=0x2ecc71
+        )
+        await interaction.response.edit_message(embed=embed, view=WelcomeLeaveView(self.guild))
+
+    @discord.ui.button(label="⬅️ Retour", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="⚙️ Configuration Seiko",
+            description="Choisissez une section",
+            color=discord.Color.blurple()
+        )
+        await interaction.response.edit_message(embed=embed, view=ConfigMainView(interaction.guild))
+
+
+class WelcomeLeaveView(discord.ui.View):
+    def __init__(self, guild: discord.Guild):
+        super().__init__(timeout=600)
+        self.guild = guild
+
+    @discord.ui.button(label="💬 Salon Bienvenue", style=discord.ButtonStyle.success)
+    async def welcome(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="💬 Sélectionner Salon Bienvenue",
+            description="Choisissez le salon dans la liste",
+            color=0x2ecc71
+        )
+        await interaction.response.edit_message(embed=embed, view=ChannelSelectView(self.guild, "welcome", next_view_factory=lambda g: RolesSalonsView(g), back_view_factory=lambda g: WelcomeLeaveView(g)))
+
+    @discord.ui.button(label="👋 Salon Adieu", style=discord.ButtonStyle.danger)
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="👋 Sélectionner Salon Adieu",
+            description="Choisissez le salon dans la liste",
+            color=0xe74c3c
+        )
+        await interaction.response.edit_message(embed=embed, view=ChannelSelectView(self.guild, "leave", next_view_factory=lambda g: RolesSalonsView(g), back_view_factory=lambda g: WelcomeLeaveView(g)))
+
+    @discord.ui.button(label="⬅️ Retour", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="📋 Rôles & Salons",
+        )
+        await interaction.response.edit_message(embed=embed, view=RolesSalonsView(self.guild))
+
+
+class LogsConfigView(discord.ui.View):
+    def __init__(self, bot, guild: discord.Guild = None):
+        super().__init__(timeout=600)
+        self.bot = bot
+        self.guild = guild
+
+    @discord.ui.button(label="🔍 Détecter Logs", style=discord.ButtonStyle.primary)
+    async def detect_logs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        missing_logs = []
+        log_types = ["messages", "moderation", "ticket", "vocal", "securite"]
+        
+        for log_type in log_types:
+            channel_id = config.CONFIG.get("logs", {}).get(log_type)
+            if not channel_id or not guild.get_channel(channel_id):
+                missing_logs.append(log_type)
+        
+        if missing_logs:
+            msg = f"❌ **Salons de logs manquants** :\n" + "\n".join(f"  • {log}" for log in missing_logs)
+            msg += f"\n\n✅ Utilisez `/add-cat-log` pour créer automatiquement tous les salons"
+        else:
+            msg = "✅ Tous les salons de logs sont configurés!"
+        
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @discord.ui.button(label="➕ Ajouter Logs Auto", style=discord.ButtonStyle.success)
+    async def auto_add_logs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Exécution de `/add-cat-log`...", ephemeral=True)
+        # Cette commande existe déjà
+
+    @discord.ui.button(label="⬅️ Retour", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="⚙️ Configuration Seiko",
+            description="Choisissez une section",
+            color=discord.Color.blurple()
+        )
+        guild = self.guild or interaction.guild
+        await interaction.response.edit_message(embed=embed, view=ConfigMainView(guild))
+
+
+class SecurityConfigView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    @discord.ui.button(label="🚫 Anti-Spam", style=discord.ButtonStyle.danger)
+    async def toggle_spam(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current = config.CONFIG["security"].get("anti_spam", False)
+        config.CONFIG["security"]["anti_spam"] = not current
+        status = "✅ Activé" if not current else "❌ Désactivé"
+        await interaction.response.send_message(f"🚫 Anti-Spam : {status}", ephemeral=True)
+
+    @discord.ui.button(label="🎯 Anti-Raid", style=discord.ButtonStyle.danger)
+    async def toggle_raid(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current = config.CONFIG["security"].get("anti_raid", False)
+        config.CONFIG["security"]["anti_raid"] = not current
+        status = "✅ Activé" if not current else "❌ Désactivé"
+        await interaction.response.send_message(f"🎯 Anti-Raid : {status}", ephemeral=True)
+
+    @discord.ui.button(label="🔐 Anti-Hack", style=discord.ButtonStyle.danger)
+    async def toggle_hack(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current = config.CONFIG["security"].get("anti_hack", False)
+        config.CONFIG["security"]["anti_hack"] = not current
+        status = "✅ Activé" if not current else "❌ Désactivé"
+        await interaction.response.send_message(f"🔐 Anti-Hack : {status}", ephemeral=True)
+
+    @discord.ui.button(label="📊 État", style=discord.ButtonStyle.blurple)
+    async def status(self, interaction: discord.Interaction, button: discord.ui.Button):
+        spam = "✅" if config.CONFIG["security"].get("anti_spam") else "❌"
+        raid = "✅" if config.CONFIG["security"].get("anti_raid") else "❌"
+        hack = "✅" if config.CONFIG["security"].get("anti_hack") else "❌"
+        
+        embed = discord.Embed(
+            title="🛡️ État de la Sécurité",
+            description=f"{spam} Anti-Spam\n{raid} Anti-Raid\n{hack} Anti-Hack",
+            color=0xe74c3c
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="⬅️ Retour", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="⚙️ Configuration Seiko",
+            description="Choisissez une section",
+            color=discord.Color.blurple()
+        )
+        await interaction.response.edit_message(embed=embed, view=ConfigMainView(interaction.guild))
+
+    @discord.ui.button(label="🔤 Autorisations", style=discord.ButtonStyle.secondary)
+    async def set_permissions(self, interaction: discord.Interaction, button: discord.ui.Button):
+        class PermModal(discord.ui.Modal, title="Définir commandes autorisées pour un rôle"):
+            role_input = discord.ui.TextInput(label="Rôle (mention ou ID)", placeholder="@Role ou 1234567890123456", required=True)
+            cmds_input = discord.ui.TextInput(label="Commandes autorisées", placeholder="ping, ticket-panel, kick", required=True)
+            async def on_submit(self, modal_interaction: discord.Interaction):
+                role_val = self.role_input.value.strip()
+                cmds_val = self.cmds_input.value.strip()
+                import re
+                m = re.search(r"(\d{17,20})", role_val)
+                role_id = int(m.group(1)) if m else (int(role_val) if role_val.isdigit() else None)
+                if not role_id:
+                    await modal_interaction.response.send_message("❌ Rôle invalide.", ephemeral=True)
+                    return
+                cmds = [c.strip() for c in cmds_val.split(",") if c.strip()]
+                config.CONFIG.setdefault("roles_permissions", {})[str(role_id)] = cmds
+                await modal_interaction.response.send_message(f"✅ Permissions définies pour <@&{role_id}>: {', '.join(cmds)}", ephemeral=True)
+
+        await interaction.response.send_modal(PermModal())
+
+
+# ============================
+# === COMMANDES DE CONFIGURATION ===
+# ============================
+
+@bot.tree.command(name="config", description="Configure le bot")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def config_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(
+        title="⚙️ Configuration Seiko",
+        description="Choisissez une section pour configurer le bot",
+        color=discord.Color.blurple()
+    )
+    await interaction.followup.send(embed=embed, view=ConfigMainView(interaction.guild), ephemeral=True)
+
+
+@bot.tree.command(name="salon-words", description="Active/désactive la détection de mots vulgaires dans les salons")
+@discord.app_commands.describe(actif="True ou False")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def salon_words(interaction: discord.Interaction, actif: bool):
+    config.CONFIG.setdefault("security", {})["filter_words"] = actif
+    await interaction.response.send_message(f"✅ Détection des mots vulgaires {'activée' if actif else 'désactivée'}.", ephemeral=True)
+
+
+@bot.tree.command(name="salon-links", description="Active/désactive la détection des liens dans les salons")
+@discord.app_commands.describe(actif="True ou False")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def salon_links(interaction: discord.Interaction, actif: bool):
+    config.CONFIG.setdefault("security", {})["filter_links"] = actif
+    await interaction.response.send_message(f"✅ Détection des liens {'activée' if actif else 'désactivée'}.", ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE SETUP ===
+# ============================
+
 class SetupStep0View(discord.ui.View):
+    """Étape 0: Rôle de base à l'arrivée"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1063,13 +1483,14 @@ class SetupStep0View(discord.ui.View):
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title="🎓 Setup Seiko - Étape 1/6",
-            description="Rôles à configurer : Rôle Admin",
+            description="**Rôles à l'arrivée d'un nouveau membre**\n\nQuels rôles doivent être attribués automatiquement à l'arrivée ?",
             color=0x3498db
         )
         await interaction.response.edit_message(embed=embed, view=SetupStep1View(self.guild, self.source_channel))
 
 
 class SetupStep1View(discord.ui.View):
+    """Étape 1: Rôle Admin"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1077,11 +1498,16 @@ class SetupStep1View(discord.ui.View):
 
     @discord.ui.button(label="👑 Sélectionner Rôle Admin", style=discord.ButtonStyle.primary)
     async def select_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="🎓 Setup Seiko - Rôle Admin", description="Choisissez le rôle admin dans la liste", color=0x3498db)
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Rôle Admin",
+            description="Choisissez le rôle admin dans la liste",
+            color=0x3498db
+        )
         await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "admin", next_view_factory=lambda g: SetupStep2View(g, self.source_channel), back_view_factory=lambda g: SetupStep1View(g, self.source_channel)))
 
 
 class SetupStep2View(discord.ui.View):
+    """Étape 2: Rôle Modérateur"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1089,11 +1515,16 @@ class SetupStep2View(discord.ui.View):
 
     @discord.ui.button(label="🛡️ Sélectionner Rôle Modérateur", style=discord.ButtonStyle.primary)
     async def select_mod(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="🎓 Setup Seiko - Rôle Modérateur", description="Choisissez le rôle modérateur dans la liste", color=0x3498db)
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Rôle Modérateur",
+            description="Choisissez le rôle modérateur dans la liste",
+            color=0x3498db
+        )
         await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "moderator", next_view_factory=lambda g: SetupStep3View(g, self.source_channel), back_view_factory=lambda g: SetupStep2View(g, self.source_channel)))
 
 
 class SetupStep3View(discord.ui.View):
+    """Étape 3: Rôle Fondateur"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1101,11 +1532,16 @@ class SetupStep3View(discord.ui.View):
 
     @discord.ui.button(label="🎯 Sélectionner Rôle Fondateur", style=discord.ButtonStyle.primary)
     async def select_founder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="🎓 Setup Seiko - Rôle Fondateur", description="Choisissez le rôle fondateur dans la liste", color=0x3498db)
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Rôle Fondateur",
+            description="Choisissez le rôle fondateur dans la liste",
+            color=0x3498db
+        )
         await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "founder", next_view_factory=lambda g: SetupStep4View(g, self.source_channel), back_view_factory=lambda g: SetupStep3View(g, self.source_channel)))
 
 
 class SetupStep4View(discord.ui.View):
+    """Étape 4: Salon Bienvenue"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1113,11 +1549,16 @@ class SetupStep4View(discord.ui.View):
 
     @discord.ui.button(label="💬 Sélectionner Salon Bienvenue", style=discord.ButtonStyle.success)
     async def select_welcome(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="🎓 Setup Seiko - Salon Bienvenue", description="Choisissez le salon bienvenue dans la liste", color=0x3498db)
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Salon Bienvenue",
+            description="Choisissez le salon bienvenue dans la liste",
+            color=0x3498db
+        )
         await interaction.response.edit_message(embed=embed, view=ChannelSelectView(self.guild, "welcome", next_view_factory=lambda g: SetupStep5View(g, self.source_channel), back_view_factory=lambda g: SetupStep4View(g, self.source_channel)))
 
 
 class SetupStep5View(discord.ui.View):
+    """Étape 5: Salon Adieu"""
     def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1125,11 +1566,16 @@ class SetupStep5View(discord.ui.View):
 
     @discord.ui.button(label="👋 Sélectionner Salon Adieu", style=discord.ButtonStyle.danger)
     async def select_leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="🎓 Setup Seiko - Salon Adieu", description="Choisissez le salon adieu dans la liste", color=0x3498db)
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Salon Adieu",
+            description="Choisissez le salon adieu dans la liste",
+            color=0x3498db
+        )
         await interaction.response.edit_message(embed=embed, view=ChannelSelectView(self.guild, "leave", next_view_factory=lambda g: SetupFinishView(g, self.source_channel), back_view_factory=lambda g: SetupStep5View(g, self.source_channel)))
 
 
 class SetupFinishView(discord.ui.View):
+    """Étape Finale: Configuration des tickets + Création des logs"""
     def __init__(self, guild: discord.Guild = None, source_channel: discord.TextChannel = None):
         super().__init__(timeout=600)
         self.guild = guild
@@ -1137,36 +1583,40 @@ class SetupFinishView(discord.ui.View):
 
     @discord.ui.button(label="✅ Configurer Tickets", style=discord.ButtonStyle.success)
     async def configure_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="🎟️ Configuration Tickets", description="Choisissez le mode de fonctionnement", color=0x5865F2)
+        embed = discord.Embed(
+            title="🎟️ Configuration Tickets",
+            description="Choisissez le mode de fonctionnement",
+            color=0x5865F2
+        )
         await interaction.response.edit_message(embed=embed, view=TicketConfigView(source_channel=self.source_channel))
 
     @discord.ui.button(label="⏭️ Passer", style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Créer le salon Sauvegarde et sauvegarder la config si possible
-        try:
-            backup_channel = await create_backup_channel(self.guild)
-            if backup_channel:
-                await save_guild_config(self.guild, config.CONFIG)
-        except Exception:
-            pass
-
+        # Créer le salon Sauvegarde
+        backup_channel = await create_backup_channel(self.guild)
+        
+        # Sauvegarder la configuration
+        if backup_channel:
+            await save_guild_config(self.guild, config.CONFIG)
+        
         await interaction.response.send_message(
             "✅ **Setup Terminé!**\n\n"
-            "🔒 Votre configuration a été sauvegardée dans le salon de sauvegarde (si présent).\n"
+            "🔒 Votre configuration a été sauvegardée dans le salon **📁-sauvegarde**\n"
+            "⚠️ Ne supprimez pas ce fichier - le bot en a besoin pour se reconfigurer!\n\n"
             "Vous pouvez configurer les tickets plus tard avec `/ticket-config`",
             ephemeral=True
         )
-        # Envoyer guide si possible
+        # Envoyer POUR_TOI.txt
         try:
             file_path = Path('POUR_TOI.txt')
             if self.source_channel and file_path.exists():
                 await self.source_channel.send(file=discord.File(str(file_path), filename='POUR_TOI.txt'))
             elif self.source_channel:
                 await self.source_channel.send("📖 Guide introuvable sur le serveur.")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Setup] Erreur envoi POUR_TOI.txt: {e}")
 
-# === AJOUT : commande /start (tunnel du tutoriel de setup) ===
+
 @bot.tree.command(name="start", description="Tutoriel de configuration du serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def start_setup(interaction: discord.Interaction):
@@ -1178,4 +1628,310 @@ async def start_setup(interaction: discord.Interaction):
     )
     await interaction.followup.send(embed=embed, view=SetupStep0View(interaction.guild, interaction.channel), ephemeral=True)
 
-# ...existing code...
+
+# ============================
+# === COMMANDES D'AUDIT ===
+# ============================
+
+@bot.tree.command(name="reachlog", description="Affiche le dernier log d'audit")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def reachlog(interaction: discord.Interaction):
+    try:
+        async for entry in interaction.guild.audit_logs(limit=1):
+            log_msg = f"**{entry.action.name}**\n"
+            log_msg += f"**Cible** : {getattr(entry, 'target', 'Inconnue')}\n"
+            log_msg += f"**Auteur** : {entry.user}\n"
+            log_msg += f"**Date** : <t:{int(entry.created_at.timestamp())}:R>"
+            await interaction.response.send_message(log_msg, ephemeral=True)
+            return
+        await interaction.response.send_message("📭 Aucun log trouvé.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+
+@bot.tree.command(name="reach-id", description="Résout un ID Discord")
+@discord.app_commands.describe(id="ID à résoudre")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def reach_id(interaction: discord.Interaction, id: str):
+    try:
+        obj_id = int(id)
+    except ValueError:
+        await interaction.response.send_message("❌ ID invalide. Doit être un nombre.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    results = []
+
+    member = guild.get_member(obj_id)
+    if member:
+        results.append(f"👤 **Membre** : {member.mention} (`{member}`)")
+
+    channel = guild.get_channel(obj_id)
+    if channel:
+        results.append(f"💬 **Salon** : {channel.mention} (`{channel.name}`)")
+
+    role = guild.get_role(obj_id)
+    if role:
+        results.append(f"👑 **Rôle** : {role.mention} (`{role.name}`)")
+
+    if results:
+        await interaction.response.send_message(
+            f"🔍 Résultats pour l'ID `{id}` :\n" + "\n".join(results),
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"❌ Aucun utilisateur, salon ou rôle trouvé avec l'ID `{id}`.",
+            ephemeral=True
+        )
+
+
+# ============================
+# === COMMANDES DE SAUVEGARDE ===
+# ============================
+
+@bot.tree.command(name="save", description="Sauvegarde la configuration actuelle")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def save_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
+    # Créer le salon de sauvegarde si nécessaire
+    backup_channel = await create_backup_channel(guild)
+
+    # Sauvegarder la configuration
+    try:
+        await save_guild_config(guild, config.CONFIG)
+        await interaction.followup.send(f"✅ Configuration sauvegardée dans {backup_channel.mention}.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur lors de la sauvegarde: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="load-save", description="Charge une sauvegarde depuis un salon de sauvegarde")
+@discord.app_commands.describe(salon="Salon contenant la sauvegarde (choix via autocomplete)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
+    """Recherche dans le salon donné une sauvegarde (fichier .json ou JSON dans le message) et la charge."""
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
+    loaded_config = None
+    source_msg = None
+
+    try:
+        async for msg in salon.history(limit=300):
+            # 1) vérifier les pièces jointes
+            for att in msg.attachments:
+                name = (att.filename or "").lower()
+                if name.endswith(".json"):
+                    try:
+                        raw = await att.read()
+                        import json
+                        loaded_config = json.loads(raw.decode("utf-8", errors="ignore"))
+                        source_msg = msg
+                        break
+                    except Exception:
+                        continue
+            if loaded_config:
+                break
+
+            # 2) essayer de parser du JSON dans le contenu du message
+            if msg.content and ("{" in msg.content and "}" in msg.content):
+                try:
+                    import json, re
+                    # extraire premier bloc JSON basique
+                    m = re.search(r"(\{.*\})", msg.content, re.S)
+                    if m:
+                        candidate = m.group(1)
+                        loaded_config = json.loads(candidate)
+                        source_msg = msg
+                        break
+                except Exception:
+                    pass
+
+        if not loaded_config:
+            await interaction.followup.send(f"❌ Aucune sauvegarde JSON trouvée dans {salon.mention}.", ephemeral=True)
+            return
+
+        # Tenter d'appliquer la configuration si la fonction existe dans utils.config_manager
+        applied = None
+        try:
+            apply_fn = getattr(config_manager, "apply_guild_config", None)
+            if apply_fn:
+                # si c'est coroutine ou fonction sync, gérer les deux cas
+                if asyncio.iscoroutinefunction(apply_fn):
+                    applied = await apply_fn(bot, guild, loaded_config)
+                else:
+                    applied = apply_fn(bot, guild, loaded_config)
+            else:
+                # Pas d'apply disponible : on met simplement à jour la config en mémoire
+                config.CONFIG.update(loaded_config)
+                applied = loaded_config
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ La sauvegarde a été chargée mais l'application automatique a échoué : {e}", ephemeral=True)
+            # continuer : on sauvegarde quand même la donnée brute
+            config.CONFIG.update(loaded_config)
+            applied = loaded_config
+
+        # Sauvegarder la configuration via la fonction existante
+        try:
+            await save_guild_config(guild, config.CONFIG)
+        except Exception:
+            pass
+
+        # Préparer résumé succinct
+        keys = ", ".join(sorted(list(applied.keys()))) if isinstance(applied, dict) else "données non structurées"
+        summary = (
+            f"✅ Sauvegarde chargée depuis {salon.mention}.\n"
+            f"🔎 Message source : <@{source_msg.author.id}> (ID: {source_msg.id})\n"
+            f"🗂️ Clés détectées : {keys}\n"
+            f"💾 Configuration mise à jour en mémoire et sauvegardée."
+        )
+        await interaction.followup.send(summary, ephemeral=True)
+
+        # Envoyer un log informatif
+        try:
+            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.utcnow())
+            await send_log_to(bot, "commands", embed)
+        except Exception:
+            pass
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur durant la lecture du salon : {e}", ephemeral=True)
+
+
+# ============================
+# === COMMANDES D'ASSISTANCE ===
+# ============================
+
+@bot.tree.command(name="aide", description="Obtenir de l'aide sur les commandes")
+async def aide(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🆘 Aide - Commandes Seiko",
+        description="Voici quelques-unes des commandes disponibles :",
+        color=0x5865F2
+    )
+    
+    # Ajouter les commandes de manière dynamique
+    for command in bot.tree.get_commands():
+        if command.parent is None:  # Seulement les commandes de premier niveau
+            embed.add_field(
+                name=f"/{command.name}",
+                value=command.description or "Pas de description",
+                inline=False
+            )
+    
+    embed.set_footer(text="Utilisez /help <commande> pour plus de détails sur une commande.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="help", description="Obtenir de l'aide sur une commande spécifique")
+@discord.app_commands.describe(commande="La commande sur laquelle vous avez besoin d'aide")
+async def help_cmd(interaction: discord.Interaction, commande: str):
+    command = bot.tree.get_command(commande)
+    if command:
+        embed = discord.Embed(
+            title=f"🆘 Aide - Commande /{command.name}",
+            description=command.description or "Pas de description",
+            color=0x5865F2
+        )
+        # Ajouter les détails de la commande ici si nécessaire
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Commande inconnue.", ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE TEST ===
+# ============================
+
+@bot.tree.command(name="test-embed", description="Envoyer un embed de test")
+async def test_embed(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="Ceci est un test",
+        description="Ceci est un embed de test pour vérifier la mise en forme.",
+        color=0x3498db
+    )
+    embed.add_field(name="Champ 1", value="Ceci est le champ 1", inline=True)
+    embed.add_field(name="Champ 2", value="Ceci est le champ 2", inline=True)
+    embed.set_footer(text="Ceci est un pied de page")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="test-button", description="Envoyer un message avec un bouton de test")
+async def test_button(interaction: discord.Interaction):
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Cliquez-moi!", style=discord.ButtonStyle.primary))
+    
+    await interaction.response.send_message("Voici un bouton de test:", view=view, ephemeral=True)
+
+@bot.tree.command(name="test-select", description="Envoyer un message avec un menu déroulant de test")
+async def test_select(interaction: discord.Interaction):
+    select = discord.ui.Select(
+        placeholder="Choisissez une option...",
+        options=[
+            discord.SelectOption(label="Option 1", value="1"),
+            discord.SelectOption(label="Option 2", value="2"),
+            discord.SelectOption(label="Option 3", value="3")
+        ]
+    )
+    
+    async def select_callback(interaction: discord.Interaction):
+        await interaction.response.send_message(f"Vous avez sélectionné l'option {select.values[0]}", ephemeral=True)
+    
+    select.callback = select_callback
+    
+    view = discord.ui.View()
+    view.add_item(select)
+    
+    await interaction.response.send_message("Voici un menu déroulant de test:", view=view, ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE DEBUG ===
+# ============================
+
+@bot.tree.command(name="debug-sentry", description="Tester l'envoi d'une erreur à Sentry")
+async def debug_sentry(interaction: discord.Interaction):
+    try:
+        division_par_zero = 1 / 0  # Ceci va causer une exception
+    except Exception as e:
+        await interaction.response.send_message("✅ Erreur capturée et envoyée à Sentry.", ephemeral=True)
+        import sentry_sdk
+        sentry_sdk.capture_exception(e)
+    else:
+        await interaction.response.send_message("❌ Aucune erreur n'a été levée.", ephemeral=True)
+
+
+@bot.tree.command(name="debug-log", description="Envoyer un message de log personnalisé")
+@discord.app_commands.describe(message="Le message à envoyer dans les logs")
+async def debug_log(interaction: discord.Interaction, message: str):
+    try:
+        await send_log_to(bot, "commands", f"Log de debug: {message}")
+        await interaction.response.send_message("✅ Message de log envoyé.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erreur lors de l'envoi du log: {e}", ephemeral=True)
+
+
+# ============================
+# === COMMANDES GÉNÉRALES (suite) ===
+# ============================
+
+@bot.tree.command(name="about", description="Informations sur le bot")
+async def about(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🤖 À propos de Seiko Security",
+        description="Seiko Security est un bot Discord avancé pour la modération, la sécurité et la gestion des tickets.",
+        color=0x5865F2
+    )
+    embed.add_field(name="Créateur", value="VotreNom#1234", inline=True)
+    embed.add_field(name="Serveur de support", value="Lien vers votre serveur", inline=True)
+    embed.add_field(name="Version", value="1.0.0", inline=True)
+    embed.set_footer(text="Merci d'utiliser Seiko Security!")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
+async def invite(interaction: discord.Interaction):
+    await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
+
+bot.run(config.DISCORD_TOKEN)
