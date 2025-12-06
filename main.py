@@ -14,6 +14,7 @@ import io
 import requests
 from utils.logging import send_log_to
 from utils.config_manager import save_guild_config, load_guild_config_from_file, create_backup_channel, send_missing_config_alert
+import utils.config_manager as config_manager
 
 # === MINI SERVEUR WEB POUR RENDRE/KEEP ALIVE ===
 import os
@@ -591,25 +592,9 @@ async def on_ready():
         except Exception as e:
             print(f"❌ Erreur synchronisation : {e}")
         
-        # ===== CHARGER LES CONFIGURATIONS SAUVEGARDÉES =====
-        print("\n🔍 Recherche des configurations sauvegardées...")
-        for guild in bot.guilds:
-            try:
-                loaded_config = await load_guild_config_from_file(guild)
-                if loaded_config:
-                    # Appliquer la config (création salons manquants, mapping rôles)
-                    try:
-                        applied = await apply_guild_config(bot, guild, loaded_config)
-                        config.CONFIG.update(applied)
-                        print(f"✅ Configuration appliquée pour {guild.name}")
-                    except Exception as e:
-                        print(f"❌ Erreur application config pour {guild.name}: {e}")
-                else:
-                    # Envoyer une alerte si config non trouvée
-                    await send_missing_config_alert(guild)
-                    print(f"⚠️ Configuration non trouvée pour {guild.name}")
-            except Exception as e:
-                print(f"❌ Erreur chargement config pour {guild.name}: {e}")
+        # ===== REMPLACÉ : plus de scan automatique des sauvegardes au démarrage =====
+        print("\nℹ️ Le scan automatique des sauvegardes au démarrage a été désactivé.")
+        print("ℹ️ Utilisez la commande /load-save <salon_de_sauvegarde> pour charger une configuration depuis un salon de sauvegarde.")
         
         cogs_loaded = True
         
@@ -1688,8 +1673,251 @@ async def reach_id(interaction: discord.Interaction, id: str):
         )
 
 
-# ============================
-# === LANCEMENT DU BOT ===
+# =============================ig.DISCORD_TOKEN)# === LANCEMENT DU BOT ===# ============================bot.run(config.DISCORD_TOKEN)
+# === COMMANDES DE SAUVEGARDE ===
 # ============================
 
-bot.run(config.DISCORD_TOKEN)
+@bot.tree.command(name="save", description="Sauvegarde la configuration actuelle")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def save_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
+    # Créer le salon de sauvegarde si nécessaire
+    backup_channel = await create_backup_channel(guild)
+
+    # Sauvegarder la configuration
+    try:
+        await save_guild_config(guild, config.CONFIG)
+        await interaction.followup.send(f"✅ Configuration sauvegardée dans {backup_channel.mention}.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur lors de la sauvegarde: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="load-save", description="Charge une sauvegarde depuis un salon de sauvegarde")
+@discord.app_commands.describe(salon="Salon contenant la sauvegarde (choix via autocomplete)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
+    """Recherche dans le salon donné une sauvegarde (fichier .json ou JSON dans le message) et la charge."""
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
+    loaded_config = None
+    source_msg = None
+
+    try:
+        async for msg in salon.history(limit=300):
+            # 1) vérifier les pièces jointes
+            for att in msg.attachments:
+                name = (att.filename or "").lower()
+                if name.endswith(".json"):
+                    try:
+                        raw = await att.read()
+                        import json
+                        loaded_config = json.loads(raw.decode("utf-8", errors="ignore"))
+                        source_msg = msg
+                        break
+                    except Exception:
+                        continue
+            if loaded_config:
+                break
+
+            # 2) essayer de parser du JSON dans le contenu du message
+            if msg.content and ("{" in msg.content and "}" in msg.content):
+                try:
+                    import json, re
+                    # extraire premier bloc JSON basique
+                    m = re.search(r"(\{.*\})", msg.content, re.S)
+                    if m:
+                        candidate = m.group(1)
+                        loaded_config = json.loads(candidate)
+                        source_msg = msg
+                        break
+                except Exception:
+                    pass
+
+        if not loaded_config:
+            await interaction.followup.send(f"❌ Aucune sauvegarde JSON trouvée dans {salon.mention}.", ephemeral=True)
+            return
+
+        # Tenter d'appliquer la configuration si la fonction existe dans utils.config_manager
+        applied = None
+        try:
+            apply_fn = getattr(config_manager, "apply_guild_config", None)
+            if apply_fn:
+                # si c'est coroutine ou fonction sync, gérer les deux cas
+                if asyncio.iscoroutinefunction(apply_fn):
+                    applied = await apply_fn(bot, guild, loaded_config)
+                else:
+                    applied = apply_fn(bot, guild, loaded_config)
+            else:
+                # Pas d'apply disponible : on met simplement à jour la config en mémoire
+                config.CONFIG.update(loaded_config)
+                applied = loaded_config
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ La sauvegarde a été chargée mais l'application automatique a échoué : {e}", ephemeral=True)
+            # continuer : on sauvegarde quand même la donnée brute
+            config.CONFIG.update(loaded_config)
+            applied = loaded_config
+
+        # Sauvegarder la configuration via la fonction existante
+        try:
+            await save_guild_config(guild, config.CONFIG)
+        except Exception:
+            pass
+
+        # Préparer résumé succinct
+        keys = ", ".join(sorted(list(applied.keys()))) if isinstance(applied, dict) else "données non structurées"
+        summary = (
+            f"✅ Sauvegarde chargée depuis {salon.mention}.\n"
+            f"🔎 Message source : <@{source_msg.author.id}> (ID: {source_msg.id})\n"
+            f"🗂️ Clés détectées : {keys}\n"
+            f"💾 Configuration mise à jour en mémoire et sauvegardée."
+        )
+        await interaction.followup.send(summary, ephemeral=True)
+
+        # Envoyer un log informatif
+        try:
+            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.utcnow())
+            await send_log_to(bot, "commands", embed)
+        except Exception:
+            pass
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur durant la lecture du salon : {e}", ephemeral=True)
+
+
+# ============================
+# === COMMANDES D'ASSISTANCE ===
+# ============================
+
+@bot.tree.command(name="aide", description="Obtenir de l'aide sur les commandes")
+async def aide(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🆘 Aide - Commandes Seiko",
+        description="Voici quelques-unes des commandes disponibles :",
+        color=0x5865F2
+    )
+    
+    # Ajouter les commandes de manière dynamique
+    for command in bot.tree.get_commands():
+        if command.parent is None:  # Seulement les commandes de premier niveau
+            embed.add_field(
+                name=f"/{command.name}",
+                value=command.description or "Pas de description",
+                inline=False
+            )
+    
+    embed.set_footer(text="Utilisez /help <commande> pour plus de détails sur une commande.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="help", description="Obtenir de l'aide sur une commande spécifique")
+@discord.app_commands.describe(commande="La commande sur laquelle vous avez besoin d'aide")
+async def help_cmd(interaction: discord.Interaction, commande: str):
+    command = bot.tree.get_command(commande)
+    if command:
+        embed = discord.Embed(
+            title=f"🆘 Aide - Commande /{command.name}",
+            description=command.description or "Pas de description",
+            color=0x5865F2
+        )
+        # Ajouter les détails de la commande ici si nécessaire
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Commande inconnue.", ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE TEST ===
+# ============================
+
+@bot.tree.command(name="test-embed", description="Envoyer un embed de test")
+async def test_embed(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="Ceci est un test",
+        description="Ceci est un embed de test pour vérifier la mise en forme.",
+        color=0x3498db
+    )
+    embed.add_field(name="Champ 1", value="Ceci est le champ 1", inline=True)
+    embed.add_field(name="Champ 2", value="Ceci est le champ 2", inline=True)
+    embed.set_footer(text="Ceci est un pied de page")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="test-button", description="Envoyer un message avec un bouton de test")
+async def test_button(interaction: discord.Interaction):
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Cliquez-moi!", style=discord.ButtonStyle.primary))
+    
+    await interaction.response.send_message("Voici un bouton de test:", view=view, ephemeral=True)
+
+@bot.tree.command(name="test-select", description="Envoyer un message avec un menu déroulant de test")
+async def test_select(interaction: discord.Interaction):
+    select = discord.ui.Select(
+        placeholder="Choisissez une option...",
+        options=[
+            discord.SelectOption(label="Option 1", value="1"),
+            discord.SelectOption(label="Option 2", value="2"),
+            discord.SelectOption(label="Option 3", value="3")
+        ]
+    )
+    
+    async def select_callback(interaction: discord.Interaction):
+        await interaction.response.send_message(f"Vous avez sélectionné l'option {select.values[0]}", ephemeral=True)
+    
+    select.callback = select_callback
+    
+    view = discord.ui.View()
+    view.add_item(select)
+    
+    await interaction.response.send_message("Voici un menu déroulant de test:", view=view, ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE DEBUG ===
+# ============================
+
+@bot.tree.command(name="debug-sentry", description="Tester l'envoi d'une erreur à Sentry")
+async def debug_sentry(interaction: discord.Interaction):
+    try:
+        division_par_zero = 1 / 0  # Ceci va causer une exception
+    except Exception as e:
+        await interaction.response.send_message("✅ Erreur capturée et envoyée à Sentry.", ephemeral=True)
+        import sentry_sdk
+        sentry_sdk.capture_exception(e)
+    else:
+        await interaction.response.send_message("❌ Aucune erreur n'a été levée.", ephemeral=True)
+
+
+@bot.tree.command(name="debug-log", description="Envoyer un message de log personnalisé")
+@discord.app_commands.describe(message="Le message à envoyer dans les logs")
+async def debug_log(interaction: discord.Interaction, message: str):
+    try:
+        await send_log_to(bot, "commands", f"Log de debug: {message}")
+        await interaction.response.send_message("✅ Message de log envoyé.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erreur lors de l'envoi du log: {e}", ephemeral=True)
+
+
+# ============================
+# === COMMANDES GÉNÉRALES (suite) ===
+# ============================
+
+@bot.tree.command(name="about", description="Informations sur le bot")
+async def about(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🤖 À propos de Seiko Security",
+        description="Seiko Security est un bot Discord avancé pour la modération, la sécurité et la gestion des tickets.",
+        color=0x5865F2
+    )
+    embed.add_field(name="Créateur", value="VotreNom#1234", inline=True)
+    embed.add_field(name="Serveur de support", value="Lien vers votre serveur", inline=True)
+    embed.add_field(name="Version", value="1.0.0", inline=True)
+    embed.set_footer(text="Merci d'utiliser Seiko Security!")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
+async def invite(interaction: discord.Interaction):
+    await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
