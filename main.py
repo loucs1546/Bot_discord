@@ -1673,7 +1673,7 @@ async def reach_id(interaction: discord.Interaction, id: str):
         )
 
 
-# =============================ig.DISCORD_TOKEN)# === LANCEMENT DU BOT ===# ============================bot.run(config.DISCORD_TOKEN)
+# ============================
 # === COMMANDES DE SAUVEGARDE ===
 # ============================
 
@@ -1921,3 +1921,5 @@ async def about(interaction: discord.Interaction):
 @bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
 async def invite(interaction: discord.Interaction):
     await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
+
+bot.run(config.DISCORD_TOKEN)
