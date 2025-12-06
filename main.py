@@ -402,22 +402,39 @@ class TicketPanelView(discord.ui.View):
 		# (decorator a déjà lié la fonction ci-dessus)
 		# nothing else here
 
-# Modifier la commande ticket_panel pour utiliser TicketPanelView
-@bot.tree.command(name="ticket-panel", description="Envoie le panneau de création de ticket")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def ticket_panel(interaction: discord.Interaction):
-	embed = discord.Embed(
-		title="🎟️ Support - Créer un ticket",
-		description="Sélectionnez le type puis cliquez sur 'Créer le Ticket'.\n> ⚠️ Abuse = Sanction",
-		color=0x2f3136,
-		timestamp=discord.utils.utcnow()
-	)
-	embed.set_footer(text="Seiko Security • Système sécurisé")
-	await interaction.channel.send(embed=embed, view=TicketPanelView(interaction.guild))
-	await interaction.response.send_message("✅ Panneau de tickets envoyé.", ephemeral=True)
+# --- Remplacement : enregistrement programmatique et conditionnel de la commande /ticket-panel ---
+# (évite CommandAlreadyRegistered si la commande existe déjà)
 
-# --- Suppression de l'ancienne commande /ticket-panel qui causait un enregistrement en double ---
-# ancienne définition supprimée — utilisez la nouvelle implémentation de /ticket-panel plus bas (TicketPanelView)
+async def _ticket_panel_impl(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🎟️ Support - Créer un ticket",
+        description="Sélectionnez le type puis cliquez sur 'Créer le Ticket'.\n> ⚠️ Abuse = Sanction",
+        color=0x2f3136,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_footer(text="Seiko Security • Système sécurisé")
+    await interaction.channel.send(embed=embed, view=TicketPanelView(interaction.guild))
+    await interaction.response.send_message("✅ Panneau de tickets envoyé.", ephemeral=True)
+
+# Créer l'objet Command et l'ajouter seulement s'il n'existe pas encore
+try:
+    existing = bot.tree.get_command("ticket-panel")
+except Exception:
+    existing = None
+
+if not existing:
+    cmd = discord.app_commands.Command(
+        name="ticket-panel",
+        description="Envoie le panneau de création de ticket",
+        callback=_ticket_panel_impl
+    )
+    try:
+        bot.tree.add_command(cmd)
+        print("✅ Commande /ticket-panel enregistrée dynamiquement")
+    except Exception as e:
+        print(f"❌ Échec ajout commande /ticket-panel dynamiquement: {e}")
+else:
+    print("ℹ️ /ticket-panel déjà enregistrée — enregistrement dynamique ignoré")
 
 # === EVENT: on_ready ===
 @bot.event
