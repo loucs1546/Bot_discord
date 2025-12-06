@@ -385,56 +385,49 @@ class TicketManagementView(discord.ui.View):
         )
         
         class ConfirmDeleteView(discord.ui.View):
-        def __init__(self, ticket_channel, owner_id=None):
-            super().__init__(timeout=5)
-            self.ticket_channel = ticket_channel
-            self.owner_id = owner_id
+            def __init__(self, ticket_channel, owner_id=None, ticket_num=None):
+                super().__init__(timeout=5)
+                self.ticket_channel = ticket_channel
+                self.owner_id = owner_id
+                self.ticket_num = ticket_num
 
-        @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
-        async def confirm_delete(self, confirm_interaction: discord.Interaction, confirm_button: discord.ui.Button):
-            await confirm_interaction.response.defer()
-            # Récupérer tout l'historique du salon
-            messages = []
-            async for msg in self.ticket_channel.history(limit=1000, oldest_first=True):
-                if msg.author == confirm_interaction.client.user and msg.embeds:
-                    continue  # ignorer le message initial du bot
-                content = f"[{msg.created_at.strftime('%H:%M')}] **{msg.author}**: {msg.content or '(aucun texte)'}"
-                if msg.attachments:
-                    urls = ", ".join([a.url for a in msg.attachments])
-                    content += f"\n📎 Fichiers : {urls}"
-                messages.append(content)
-            full_log = "\n".join(messages) or "Aucun message dans le ticket."
-            if len(full_log) > 4000:
-                full_log = full_log[:3997] + "..."
+            @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
+            async def confirm_delete(self, confirm_interaction: discord.Interaction, confirm_button: discord.ui.Button):
+                await confirm_interaction.response.defer()
+                # Récupérer tout l'historique du salon
+                messages = []
+                async for msg in self.ticket_channel.history(limit=1000, oldest_first=True):
+                    if msg.author == confirm_interaction.client.user and msg.embeds:
+                        continue  # ignorer le message initial du bot
+                    content = f"[{msg.created_at.strftime('%H:%M')}] **{msg.author}**: {msg.content or '(aucun texte)'}"
+                    if msg.attachments:
+                        urls = ", ".join([a.url for a in msg.attachments])
+                        content += f"\n📎 Fichiers : {urls}"
+                    messages.append(content)
+                full_log = "\n".join(messages) or "Aucun message dans le ticket."
+                if len(full_log) > 4000:
+                    full_log = full_log[:3997] + "..."
 
-            # Envoyer dans #🎫・tickets
-            log_channel = discord.utils.get(confirm_interaction.guild.text_channels, name="🎫・tickets")
-            if log_channel:
-                embed = discord.Embed(
-                    title=f"🗂️ Historique ticket - {self.ticket_channel.name}",
-                    description=full_log,
-                    color=0x5865F2,
-                    timestamp=datetime.utcnow()
-                )
-                owner = confirm_interaction.guild.get_member(self.owner_id) if self.owner_id else None
-                if owner:
-                    embed.set_author(name=f"Créé par {owner}", icon_url=owner.display_avatar.url)
-                await log_channel.send(embed=embed)
+                # Envoyer dans #🎫・tickets
+                log_channel = discord.utils.get(confirm_interaction.guild.text_channels, name="🎫・tickets")
+                if log_channel:
+                    embed = discord.Embed(
+                        title=f"🗂️ Historique ticket - {self.ticket_channel.name}",
+                        description=full_log,
+                        color=0x5865F2,
+                        timestamp=datetime.utcnow()
+                    )
+                    owner = confirm_interaction.guild.get_member(self.owner_id) if self.owner_id else None
+                    if owner:
+                        embed.set_author(name=f"Créé par {owner}", icon_url=owner.display_avatar.url)
+                    await log_channel.send(embed=embed)
 
-            # Log fermeture
-            log_embed = discord.Embed(
-                title="🔒 Ticket fermé",
-                description=f"**Fermé par** : {confirm_interaction.user.mention}\n**Salon** : `{self.ticket_channel.name}`",
-                color=0xff0000,
-                timestamp=datetime.utcnow()
-            )
-            await send_log_to(confirm_interaction.client, "ticket", log_embed)
+                # Supprimer le salon
+                await self.ticket_channel.delete()
 
-            await self.ticket_channel.delete()
-
-        @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
-        async def cancel_delete(self, cancel_interaction: discord.Interaction, cancel_button: discord.ui.Button):
-            await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=True)        
+            @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
+            async def cancel_delete(self, cancel_interaction: discord.Interaction, cancel_button: discord.ui.Button):
+                await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=True)      
 
         await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=True)
 
