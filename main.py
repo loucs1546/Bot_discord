@@ -171,9 +171,12 @@ class RoleSelectView(discord.ui.View):
             def __init__(self):
                 super().__init__(label="🔎 Rechercher", style=discord.ButtonStyle.secondary)
 
-            async def callback(self, interaction: discord.Interaction):
+            async def callback(inner_self, interaction: discord.Interaction):
+                role_type_local = self.role_type  # capture pour le modal
+
                 class RoleModal(discord.ui.Modal, title="Rechercher un rôle"):
                     query = discord.ui.TextInput(label="Mention / ID / Nom du rôle", placeholder="@Role ou 123... ou Nom du rôle", max_length=100)
+
                     async def on_submit(self, modal_interaction: discord.Interaction):
                         val = self.query.value.strip()
                         g = modal_interaction.guild
@@ -181,7 +184,6 @@ class RoleSelectView(discord.ui.View):
                         # essayer ID
                         if val.isdigit():
                             role = g.get_role(int(val))
-                        # mention
                         else:
                             m = re.search(r"<@&(\d{17,20})>", val)
                             if m:
@@ -195,12 +197,13 @@ class RoleSelectView(discord.ui.View):
                         if not role:
                             await modal_interaction.response.send_message("❌ Rôle introuvable.", ephemeral=True)
                             return
-                        # appliquer
-                        config.CONFIG.setdefault("roles", {})[self.view.role_type] = role.id
-                        await modal_interaction.response.send_message(f"✅ Rôle {self.view.role_type} défini : <@&{role.id}>", ephemeral=True)
+                        # appliquer en utilisant la valeur capturée
+                        config.CONFIG.setdefault("roles", {})[role_type_local] = role.id
+                        await modal_interaction.response.send_message(f"✅ Rôle {role_type_local} défini : <@&{role.id}>", ephemeral=True)
+
                 await interaction.response.send_modal(RoleModal())
 
-		self.add_item(SearchRoleButton())
+        self.add_item(SearchRoleButton())
 
 
 class ChannelSelectView(discord.ui.View):
@@ -249,9 +252,12 @@ class ChannelSelectView(discord.ui.View):
             def __init__(self):
                 super().__init__(label="🔎 Rechercher", style=discord.ButtonStyle.secondary)
 
-            async def callback(self, interaction: discord.Interaction):
+            async def callback(inner_self, interaction: discord.Interaction):
+                channel_type_local = self.channel_type  # capture pour le modal
+
                 class ChannelModal(discord.ui.Modal, title="Rechercher un salon"):
                     query = discord.ui.TextInput(label="Mention / ID / Nom du salon", placeholder="#salon ou 123... ou nom", max_length=100)
+
                     async def on_submit(self, modal_interaction: discord.Interaction):
                         val = self.query.value.strip()
                         g = modal_interaction.guild
@@ -259,23 +265,24 @@ class ChannelSelectView(discord.ui.View):
                         # ID
                         if val.isdigit():
                             ch = g.get_channel(int(val))
-                       	else:
-							m = re.search(r"<#(\d{17,20})>", val)
-							if m:
-								ch = g.get_channel(int(m.group(1)))
-						if not ch:
-							for c in g.channels:
-								if c.name.lower() == val.lower():
-									ch = c
-									break
-						if not ch:
-							await modal_interaction.response.send_message("❌ Salon introuvable.", ephemeral=True)
-							return
-						config.CONFIG.setdefault("channels", {})[self.view.channel_type] = ch.id
-						await modal_interaction.response.send_message(f"✅ Salon {self.view.channel_type} défini : <#{ch.id}>", ephemeral=True)
-				await interaction.response.send_modal(ChannelModal())
+                        else:
+                            m = re.search(r"<#(\d{17,20})>", val)
+                            if m:
+                                ch = g.get_channel(int(m.group(1)))
+                        if not ch:
+                            for c in g.channels:
+                                if c.name.lower() == val.lower():
+                                    ch = c
+                                    break
+                        if not ch:
+                            await modal_interaction.response.send_message("❌ Salon introuvable.", ephemeral=True)
+                            return
+                        config.CONFIG.setdefault("channels", {})[channel_type_local] = ch.id
+                        await modal_interaction.response.send_message(f"✅ Salon {channel_type_local} défini : <#{ch.id}>", ephemeral=True)
 
-		self.add_item(SearchChannelButton())
+                await interaction.response.send_modal(ChannelModal())
+
+        self.add_item(SearchChannelButton())
 
 
 class LogChannelSelectView(discord.ui.View):
