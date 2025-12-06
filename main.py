@@ -16,6 +16,7 @@ from utils.logging import send_log_to
 from utils.config_manager import save_guild_config, load_guild_config_from_file, create_backup_channel, send_missing_config_alert
 import utils.config_manager as config_manager
 import traceback
+import json
 
 # === MINI SERVEUR WEB POUR RENDRE/KEEP ALIVE ===
 import os
@@ -73,6 +74,35 @@ def est_bavure_raison(raison: str) -> bool:
 
 def get_sanction_channel(bot):
     return bot.get_channel(config.CONFIG["logs"].get("sanctions"))
+
+
+# === UTILITAIRES POUR /start (à placer AVANT la commande /start) ===
+async def wait_for_channel_mention(interaction, guild, prompt="salon"):
+    msg = await interaction.channel.send(f"📌 Mentionnez le **{prompt}** (ex: #général) :")
+    try:
+        def check(m): return m.author == interaction.user and m.channel == interaction.channel and len(m.channel_mentions) == 1
+        response = await interaction.client.wait_for("message", check=check, timeout=120)
+        await msg.delete()
+        await response.delete()
+        return response.channel_mentions[0]
+    except asyncio.TimeoutError:
+        await msg.delete()
+        await interaction.channel.send("❌ Temps écoulé. Réessayez `/start`.")
+        return None
+
+async def wait_for_role_mention(interaction, guild, prompt="rôle"):
+    msg = await interaction.channel.send(f"📌 Mentionnez le **{prompt}** (ex: @Modérateur) :")
+    try:
+        def check(m): return m.author == interaction.user and m.channel == interaction.channel and len(m.role_mentions) == 1
+        response = await interaction.client.wait_for("message", check=check, timeout=120)
+        await msg.delete()
+        await response.delete()
+        return response.role_mentions[0]
+    except asyncio.TimeoutError:
+        await msg.delete()
+        await interaction.channel.send("❌ Temps écoulé. Réessayez `/start`.")
+        return None
+
 
 # === SELECT MENUS POUR CONFIG ===
 class RoleSelect(discord.ui.Select):
@@ -692,6 +722,20 @@ async def start_config(interaction: discord.Interaction):
     await interaction.channel.send(
         "✅ **Configuration terminée !**\n"
         "📄 Utilisez `/configs` pour modifier la configuration à tout moment."
+    )
+
+@bot.tree.command(name="reset", description="Réinitialise TOUTES les données du bot pour ce serveur")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def reset_config(interaction: discord.Interaction):
+    config.CONFIG.clear()
+    # Optionnel : supprimer le salon 📁-sauvegarde
+    save_ch = discord.utils.get(interaction.guild.text_channels, name="📁-sauvegarde")
+    if save_ch:
+        await save_ch.delete(reason="Réinitialisation via /reset")
+    await interaction.response.send_message(
+        "✅ Configuration **complètement réinitialisée**.\n"
+        "Utilisez `/start` pour recommencer la configuration.",
+        ephemeral=True
     )
 
 @bot.tree.command(name="configs", description="Modifier la configuration actuelle")
