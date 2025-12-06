@@ -15,6 +15,7 @@ import requests
 from utils.logging import send_log_to
 from utils.config_manager import save_guild_config, load_guild_config_from_file, create_backup_channel, send_missing_config_alert
 import utils.config_manager as config_manager
+import traceback
 
 # === MINI SERVEUR WEB POUR RENDRE/KEEP ALIVE ===
 import os
@@ -556,60 +557,71 @@ class TicketControls(TicketManagementView):
 @bot.event
 async def on_ready():
     global cogs_loaded
-    print(f"✅ {bot.user} est en ligne !")
+    print("ℹ️ on_ready called")
+    try:
+        print(f"✅ Tentative d'initialisation pour {bot.user}...")
+        if not cogs_loaded:
+            # Charger UNIQUEMENT les listeners (pas de commandes ici!)
+            cog_paths = [
+                "cogs.logging",
+                "cogs.security.antiraid",
+                "cogs.security.antispam",
+                "cogs.security.content_filter",
+                "cogs.security.link_filter",
+            ]
+            
+            for cog in cog_paths:
+                try:
+                    await bot.load_extension(cog)
+                    print(f"✅ Cog (listener) chargé : {cog}")
+                except Exception as e:
+                    print(f"❌ Erreur chargement {cog} : {e}")
+                    traceback.print_exc()
     
-    if not cogs_loaded:
-        # Charger UNIQUEMENT les listeners (pas de commandes ici!)
-        cog_paths = [
-            "cogs.logging",
-            "cogs.security.antiraid",
-            "cogs.security.antispam",
-            "cogs.security.content_filter",
-            "cogs.security.link_filter",
-        ]
-        
-        for cog in cog_paths:
+            # Attendre que les cogs soient chargés
+            await asyncio.sleep(1)
+    
+            # SYNCHRONISER LES COMMANDES
             try:
-                await bot.load_extension(cog)
-                print(f"✅ Cog (listener) chargé : {cog}")
+                if config.GUILD_ID:
+                    guild = discord.Object(id=config.GUILD_ID)
+                    bot.tree.copy_global_to(guild=guild)
+                    synced = await bot.tree.sync(guild=guild)
+                    print(f"✅ {len(synced)} commandes synchronisées !")
+                    print(f"📝 Commandes : {[c.name for c in synced]}")
+                else:
+                    synced = await bot.tree.sync()
+                    print(f"✅ {len(synced)} commandes globales synchronisées")
             except Exception as e:
-                print(f"❌ Erreur chargement {cog} : {e}")
-
-        # Attendre que les cogs soient chargés
-        await asyncio.sleep(1)
-
-        # SYNCHRONISER LES COMMANDES
-        try:
-            if config.GUILD_ID:
-                guild = discord.Object(id=config.GUILD_ID)
-                bot.tree.copy_global_to(guild=guild)
-                synced = await bot.tree.sync(guild=guild)
-                print(f"✅ {len(synced)} commandes synchronisées !")
-                print(f"📝 Commandes : {[c.name for c in synced]}")
-            else:
-                synced = await bot.tree.sync()
-                print(f"✅ {len(synced)} commandes globales synchronisées")
-        except Exception as e:
-            print(f"❌ Erreur synchronisation : {e}")
-        
-        # ===== REMPLACÉ : plus de scan automatique des sauvegardes au démarrage =====
-        print("\nℹ️ Le scan automatique des sauvegardes au démarrage a été désactivé.")
-        print("ℹ️ Utilisez la commande /load-save <salon_de_sauvegarde> pour charger une configuration depuis un salon de sauvegarde.")
-        
-        cogs_loaded = True
-        
-        # AJOUTER LES VIEWS PERSISTANTES
-        bot.add_view(TicketView())
-        bot.add_view(TicketControls(0))
-        print("✅ Views ticket enregistrées")
-        
-        # Démarrer la boucle de self-ping (anti-AFK via PING sur PUBLIC_URL)
-        try:
-            if not hasattr(bot, "self_ping_task") or bot.self_ping_task.done():
-                bot.self_ping_task = asyncio.create_task(self_ping_loop())
-                print("✅ Self-ping task démarrée")
-        except Exception as e:
-            print(f"❌ Impossible de démarrer self-ping task: {e}")
+                print(f"❌ Erreur synchronisation : {e}")
+                traceback.print_exc()
+            
+            # ===== REMPLACÉ : plus de scan automatique des sauvegardes au démarrage =====
+            print("\nℹ️ Le scan automatique des sauvegardes au démarrage a été désactivé.")
+            print("ℹ️ Utilisez la commande /load-save <salon_de_sauvegarde> pour charger une configuration depuis un salon de sauvegarde.")
+            
+            cogs_loaded = True
+            
+            # AJOUTER LES VIEWS PERSISTANTES
+            try:
+                bot.add_view(TicketView())
+                bot.add_view(TicketControls(0))
+                print("✅ Views ticket enregistrées")
+            except Exception as e:
+                print(f"❌ Erreur enregistrement views persistantes: {e}")
+                traceback.print_exc()
+            
+            # Démarrer la boucle de self-ping (anti-AFK via PING sur PUBLIC_URL)
+            try:
+                if not hasattr(bot, "self_ping_task") or bot.self_ping_task.done():
+                    bot.self_ping_task = asyncio.create_task(self_ping_loop())
+                    print("✅ Self-ping task démarrée")
+            except Exception as e:
+                print(f"❌ Impossible de démarrer self-ping task: {e}")
+                traceback.print_exc()
+    except Exception as e:
+        print(f"❌ Exception dans on_ready: {e}")
+        traceback.print_exc()
 
 
 # === SYSTÈME ANTI-AFK ===
