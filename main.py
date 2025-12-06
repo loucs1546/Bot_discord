@@ -939,86 +939,8 @@ class TicketPanelButton(discord.ui.Button):
         )
 
 
-
-@bot.tree.command(name="create-categorie", description="Crée une catégorie personnalisée")
-@discord.app_commands.describe(nom="Nom de la catégorie")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def create_categorie(interaction: discord.Interaction, nom: str):
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-    
-    try:
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-        category = await guild.create_category(name=nom, overwrites=overwrites)
-        await interaction.followup.send(
-            f"✅ Catégorie **{category.name}** créée avec succès !\nID : `{category.id}`",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
-
-
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def create_salon(interaction: discord.Interaction, nom: str, categorie: discord.CategoryChannel):
-    await interaction.response.defer(ephemeral=True)
-    
-    try:
-        channel = await categorie.create_text_channel(name=nom)
-        await interaction.followup.send(
-            f"✅ Salon **#{channel.name}** créé dans **{categorie.name}** !\nID : `{channel.id}`",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
-
-
 # ============================
-# === COMMANDES DE SALON ===
-# ============================
-
-@bot.tree.command(name="clear-salon", description="Supprime tous les messages du salon")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
-async def clear_salon(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=1000)
-    await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=True)
-
-@bot.tree.command(name="delete-salon", description="Supprime un salon")
-@discord.app_commands.describe(salon="Salon à supprimer")
-@discord.app_commands.checks.has_permissions(manage_channels=True)
-async def delete_salon(interaction: discord.Interaction, salon: discord.TextChannel):
-    await salon.delete(reason=f"Supprimé par {interaction.user}")
-    await interaction.response.send_message(f"✅ Salon **{salon.name}** supprimé.", ephemeral=True)
-
-@bot.tree.command(name="delete-categorie", description="Supprime une catégorie et ses salons")
-@discord.app_commands.describe(categorie="Catégorie à supprimer")
-@discord.app_commands.checks.has_permissions(manage_channels=True)
-async def delete_categorie(interaction: discord.Interaction, categorie: discord.CategoryChannel):
-    await interaction.response.send_message("✅ Suppression en cours...", ephemeral=True)
-    for channel in categorie.channels:
-        try:
-            await channel.delete(reason=f"Supprimé avec la catégorie par {interaction.user}")
-        except:
-            pass
-    try:
-        await categorie.delete(reason=f"Supprimé par {interaction.user}")
-    except:
-        pass
-
-@bot.tree.command(name="say", description="Envoie un message dans un salon")
-@discord.app_commands.describe(salon="Salon cible", contenu="Message à envoyer")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
-async def say(interaction: discord.Interaction, salon: discord.TextChannel, contenu: str):
-    contenu_nettoye = contenu.replace("\\n", "\n")
-    await salon.send(contenu_nettoye)
-    await interaction.response.send_message(f"✅ Message envoyé dans {salon.mention}.", ephemeral=True)
-
-
-# ============================
-# === COMMANDES DE MODÉRATION ===
+# === COMMANDES DE MODÉRATION 
 # ============================
 
 @bot.tree.command(name="kick", description="Expulse un membre")
