@@ -1748,6 +1748,729 @@ async def sync_commands(interaction: discord.Interaction):
 
 
 # ============================
+# === COMMANDES DE TICKETS MULTI-PANEL ===
+# ============================
+
+@bot.tree.command(name="ticket-config", description="Configurer le système de tickets")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def ticket_config(interaction: discord.Interaction):
+    """Configurer plusieurs systèmes de tickets"""
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(
+        title="🎟️ Configuration Tickets",
+        description="Voulez-vous modifier un panel existant ou en créer un nouveau ?",
+        color=0x5865F2
+    )
+    await interaction.followup.send(embed=embed, view=TicketMultiConfigView(), ephemeral=True)
+
+class TicketMultiConfigView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)
+        systems = config.CONFIG.setdefault("ticket_systems", {})
+        for sys_name in systems:
+            self.add_item(TicketSystemButton(sys_name))
+        self.add_item(NewTicketSystemButton())
+
+class TicketSystemButton(discord.ui.Button):
+    def __init__(self, sys_name):
+        super().__init__(label=f"Modifier : {sys_name}", style=discord.ButtonStyle.primary)
+        self.sys_name = sys_name
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"Configuration du système de ticket **{self.sys_name}**",
+            view=TicketConfigView(ticket_system=self.sys_name), ephemeral=True
+        )
+
+class NewTicketSystemButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="➕ Nouveau système de tickets", style=discord.ButtonStyle.success)
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(NewTicketSystemModal())
+
+class NewTicketSystemModal(discord.ui.Modal, title="Nouveau système de tickets"):
+    name = discord.ui.TextInput(label="Nom du système", placeholder="Support VIP", max_length=32)
+    async def on_submit(self, interaction: discord.Interaction):
+        sys_name = self.name.value.strip()
+        if not sys_name:
+            await interaction.response.send_message("❌ Nom invalide.", ephemeral=True)
+            return
+        config.CONFIG.setdefault("ticket_systems", {})[sys_name] = {
+            "mode": "basic",
+            "options": ["Support Général", "Bug Report", "Suggestion", "Autre"],
+            "counter": 0
+        }
+        await interaction.response.send_message(
+            f"Système **{sys_name}** créé. Configurez-le ci-dessous.",
+            view=TicketConfigView(ticket_system=sys_name), ephemeral=True
+        )
+
+class TicketConfigView(discord.ui.View):
+    def __init__(self, source_channel: discord.TextChannel = None, ticket_system: str = None):
+        super().__init__(timeout=600)
+        self.source_channel = source_channel
+        self.ticket_system = ticket_system
+    @discord.ui.button(label="Basic Mode", style=discord.ButtonStyle.primary, emoji="⚙️")
+    async def basic_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
+        sys = self.ticket_system or "default"
+        config.CONFIG.setdefault("ticket_systems", {}).setdefault(sys, {})
+        config.CONFIG["ticket_systems"][sys]["mode"] = "basic"
+        config.CONFIG["ticket_systems"][sys]["options"] = [
+            "Support Général",
+            "Bug Report",
+            "Suggestion",
+            "Autre"
+        ]
+        await interaction.response.send_message(
+            f"✅ Mode Basic activé pour **{sys}**.", ephemeral=True
+        )
+        try:
+            await save_guild_config(interaction.guild, config.CONFIG)
+        except Exception:
+            pass
+    @discord.ui.button(label="Advanced Mode", style=discord.ButtonStyle.success, emoji="✨")
+    async def advanced_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
+        sys = self.ticket_system or "default"
+        await interaction.response.send_modal(TicketOptionsModal(sys))
+
+class TicketOptionsModal(discord.ui.Modal, title="Options personnalisées"):
+    option1 = discord.ui.TextInput(label="Option 1", placeholder="Support VIP", max_length=100)
+    option2 = discord.ui.TextInput(label="Option 2 (optionnel)", required=False, max_length=100)
+    option3 = discord.ui.TextInput(label="Option 3 (optionnel)", required=False, max_length=100)
+    def __init__(self, sys_name):
+        super().__init__()
+        self.sys_name = sys_name
+    async def on_submit(self, interaction: discord.Interaction):
+        opts = [self.option1.value.strip()]
+        if self.option2.value: opts.append(self.option2.value.strip())
+        if self.option3.value: opts.append(self.option3.value.strip())
+        config.CONFIG.setdefault("ticket_systems", {}).setdefault(self.sys_name, {})
+        config.CONFIG["ticket_systems"][self.sys_name]["mode"] = "advanced"
+        config.CONFIG["ticket_systems"][self.sys_name]["options"] = [o for o in opts if o]
+        await interaction.response.send_message(
+            f"✅ Mode avancé configuré pour **{self.sys_name}** :\n" + "\n".join(f"• {o}" for o in opts if o),
+            ephemeral=True
+        )
+        try:
+            await save_guild_config(interaction.guild, config.CONFIG)
+        except Exception:
+            pass
+
+@bot.tree.command(name="ticket-panel", description="Envoie le panneau de création de ticket")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def ticket_panel(interaction: discord.Interaction):
+    systems = config.CONFIG.get("ticket_systems", {})
+    if not systems:
+        await interaction.response.send_message("❌ Aucun système de ticket configuré. Utilisez `/ticket-config`.", ephemeral=True)
+        return
+    embed = discord.Embed(
+        title="🎟️ Support - Choisissez un système de ticket",
+        description="Sélectionnez le système de ticket à utiliser.",
+        color=0x2f3136,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_footer(text="Seiko Security • Système multi-tickets")
+    await interaction.channel.send(embed=embed, view=TicketPanelMultiView(systems))
+    await interaction.response.send_message("✅ Panel multi-tickets envoyé.", ephemeral=True)
+
+class TicketPanelMultiView(discord.ui.View):
+    def __init__(self, systems: dict):
+        super().__init__(timeout=None)
+        for sys_name in systems:
+            self.add_item(TicketPanelButton(sys_name))
+
+class TicketPanelButton(discord.ui.Button):
+    def __init__(self, sys_name):
+        super().__init__(label=sys_name, style=discord.ButtonStyle.success)
+        self.sys_name = sys_name
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"Panel pour **{self.sys_name}**",
+            view=TicketView(ticket_system=self.sys_name),
+            ephemeral=True
+        )
+
+# TicketView adapté pour multi-systèmes
+class TicketView(discord.ui.View):
+    def __init__(self, ticket_system=None):
+        super().__init__(timeout=None)
+        self.ticket_system = ticket_system
+    @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id="create_ticket")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        user = interaction.user
+        # Vérifier qu'il n'a pas déjà un ticket
+        for channel in guild.channels:
+            if channel.name.startswith("ticket-") and str(user.id) in channel.name:
+                await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
+                return
+        # Récupérer la config du système
+        sys = self.ticket_system or "default"
+        systems = config.CONFIG.get("ticket_systems", {})
+        sys_conf = systems.get(sys)
+        if not sys_conf:
+            await interaction.response.send_message("❌ Système de ticket introuvable.", ephemeral=True)
+            return
+        mode = sys_conf.get("mode", "basic")
+        options = sys_conf.get("options", ["Support Général"])
+        counter = sys_conf.get("counter", 0)
+        if mode == "basic":
+            selected_option = options[0] if options else "Support Général"
+            ticket_num = counter + 1
+            config.CONFIG["ticket_systems"][sys]["counter"] = ticket_num
+            ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                user: discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True,
+                    attach_files=False,
+                    embed_links=False
+                ),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+            }
+            try:
+                ticket_channel = await guild.create_text_channel(
+                    name=ticket_name,
+                    overwrites=overwrites,
+                    reason=f"Ticket créé par {user} ({selected_option})"
+                )
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
+                return
+            embed = discord.Embed(
+                title=f"🎟️ {selected_option} - #{ticket_num:06d}",
+                description=f"Bonjour {user.mention},\n\n📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n\n> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.",
+                color=0x5865F2,
+                timestamp=datetime.utcnow()
+            )
+            embed.set_footer(text="Seiko Security • Système de tickets")
+            view = TicketManagementView(user.id, ticket_num)
+            await ticket_channel.send(embed=embed, view=view)
+            log_embed = discord.Embed(
+                title="🎟️ Ticket créé",
+                description=f"**Utilisateur** : {user.mention} (`{user}`)\n**Type** : {selected_option}\n**Ticket** : {ticket_channel.mention}",
+                color=0x00ff00,
+                timestamp=datetime.utcnow()
+            )
+            log_embed.set_thumbnail(url=user.display_avatar.url)
+            await send_log_to(bot, "ticket", log_embed)
+            await interaction.response.send_message(
+                f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{selected_option}**",
+                ephemeral=True
+            )
+            return
+        # Sinon afficher l'interface de choix
+        embed = discord.Embed(
+            title="🎟️ Créer un Ticket",
+            description="Sélectionnez le type de ticket et cliquez sur 'Créer le Ticket'",
+            color=0x5865F2
+        )
+        await interaction.response.send_message(embed=embed, view=TicketChoiceView(guild, sys), ephemeral=True)
+
+class TicketChoiceView(discord.ui.View):
+    def __init__(self, guild: discord.Guild, ticket_system: str):
+        super().__init__(timeout=300)
+        self.guild = guild
+        self.ticket_system = ticket_system
+        self.selected_option = None
+        select = TicketChoiceSelect(guild, ticket_system)
+        async def select_callback(interaction: discord.Interaction):
+            self.selected_option = select.values[0]
+            await interaction.response.defer()
+        select.callback = select_callback
+        self.add_item(select)
+    @discord.ui.button(label="📩 Créer le Ticket", style=discord.ButtonStyle.success)
+    async def create_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_option:
+            await interaction.response.send_message("❌ Sélectionnez un type de ticket d'abord.", ephemeral=True)
+            return
+        guild = self.guild or interaction.guild
+        user = interaction.user
+        # Vérifier qu'il n'a pas déjà un ticket
+        for channel in guild.channels:
+            if channel.name.startswith("ticket-") and str(user.id) in channel.name:
+                await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
+                return
+        # Récupérer la config du système
+        sys = self.ticket_system or "default"
+        systems = config.CONFIG.get("ticket_systems", {})
+        sys_conf = systems.get(sys)
+        if not sys_conf:
+            await interaction.response.send_message("❌ Système de ticket introuvable.", ephemeral=True)
+            return
+        ticket_num = sys_conf.get("counter", 0) + 1
+        config.CONFIG["ticket_systems"][sys]["counter"] = ticket_num
+        ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(
+                read_messages=True, 
+                send_messages=True, 
+                attach_files=False, 
+                embed_links=False
+            ),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+        }
+        try:
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                overwrites=overwrites,
+                reason=f"Ticket créé par {user} ({self.selected_option})"
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
+            return
+        embed = discord.Embed(
+            title=f"🎟️ {self.selected_option} - #{ticket_num:06d}",
+            description=f"Bonjour {user.mention},\n\n📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n\n> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.",
+            color=0x5865F2,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="Seiko Security • Système de tickets")
+        view = TicketManagementView(user.id, ticket_num)
+        await ticket_channel.send(embed=embed, view=view)
+        log_embed = discord.Embed(
+            title="🎟️ Ticket créé",
+            description=f"**Utilisateur** : {user.mention} (`{user}`)\n**Type** : {self.selected_option}\n**Ticket** : {ticket_channel.mention}",
+            color=0x00ff00,
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=user.display_avatar.url)
+        await send_log_to(bot, "ticket", log_embed)
+        await interaction.response.send_message(
+            f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{self.selected_option}**",
+            ephemeral=True
+        )
+
+
+# === EVENT: on_ready ===
+@bot.event
+async def on_ready():
+    global cogs_loaded
+    print("ℹ️ on_ready called")
+    try:
+        print(f"✅ Tentative d'initialisation pour {bot.user}...")
+        if not cogs_loaded:
+            # Charger UNIQUEMENT les listeners (pas de commandes ici!)
+            cog_paths = [
+                "cogs.logging",
+                "cogs.security.antiraid",
+                "cogs.security.antispam",
+                "cogs.security.content_filter",
+                "cogs.security.link_filter",
+            ]
+            
+            for cog in cog_paths:
+                try:
+                    await bot.load_extension(cog)
+                    print(f"✅ Cog (listener) chargé : {cog}")
+                except Exception as e:
+                    print(f"❌ Erreur chargement {cog} : {e}")
+                    traceback.print_exc()
+    
+            # Attendre que les cogs soient chargés
+            await asyncio.sleep(1)
+    
+            # SYNCHRONISER LES COMMANDES
+            try:
+                if config.GUILD_ID:
+                    guild = discord.Object(id=config.GUILD_ID)
+                    bot.tree.copy_global_to(guild=guild)
+                    synced = await bot.tree.sync(guild=guild)
+                    print(f"✅ {len(synced)} commandes synchronisées !")
+                    print(f"📝 Commandes : {[c.name for c in synced]}")
+                else:
+                    synced = await bot.tree.sync()
+                    print(f"✅ {len(synced)} commandes globales synchronisées")
+            except Exception as e:
+                print(f"❌ Erreur synchronisation : {e}")
+                traceback.print_exc()
+            
+            # ===== REMPLACÉ : plus de scan automatique des sauvegardes au démarrage =====
+            print("\nℹ️ Le scan automatique des sauvegardes au démarrage a été désactivé.")
+            print("ℹ️ Utilisez la commande /load-save <salon_de_sauvegarde> pour charger une configuration depuis un salon de sauvegarde.")
+            
+            cogs_loaded = True
+            
+            # AJOUTER LES VIEWS PERSISTANTES
+            try:
+                bot.add_view(TicketView())
+                bot.add_view(TicketControls(0))
+                print("✅ Views ticket enregistrées")
+            except Exception as e:
+                print(f"❌ Erreur enregistrement views persistantes: {e}")
+                traceback.print_exc()
+            
+            # Démarrer la boucle de self-ping (anti-AFK via PING sur PUBLIC_URL)
+            try:
+                if not hasattr(bot, "self_ping_task") or bot.self_ping_task.done():
+                    bot.self_ping_task = asyncio.create_task(self_ping_loop())
+                    print("✅ Self-ping task démarrée")
+            except Exception as e:
+                print(f"❌ Impossible de démarrer self-ping task: {e}")
+                traceback.print_exc()
+    except Exception as e:
+        print(f"❌ Exception dans on_ready: {e}")
+        traceback.print_exc()
+
+
+# === SYSTÈME ANTI-AFK ===
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://seiko-security.onrender.com/")
+PING_INTERVAL = int(os.environ.get("PING_INTERVAL", 240))  # 240s = 4 minutes
+
+
+async def self_ping_loop():
+    await asyncio.sleep(10)  # laisse le bot démarrer proprement
+    session = aiohttp.ClientSession()
+    try:
+        while True:
+            try:
+                async with session.get(PUBLIC_URL, timeout=10) as resp:
+                    status = resp.status
+                    try:
+                        text = await resp.text()
+                    except Exception:
+                        text = ""
+                    print(f"[SELF PING] {PUBLIC_URL} -> {status}")
+            except Exception as e:
+                print(f"[SELF PING] erreur: {e}")
+            await asyncio.sleep(PING_INTERVAL)
+    except CancelledError:
+        pass
+    finally:
+        await session.close()
+
+
+
+# ============================
+# === COMMANDES GÉNÉRALES ===
+# ============================
+
+@bot.tree.command(name="ping", description="Affiche la latence du bot")
+async def ping(interaction: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    await interaction.response.send_message(f"🏓 Pong ! Latence : **{latency} ms**", ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE LOGS ===
+# ============================
+
+@bot.tree.command(name="logs", description="Définit le salon pour un type de log")
+@discord.app_commands.describe(type="Type de log", salon="Salon de destination")
+@discord.app_commands.choices(type=[
+    discord.app_commands.Choice(name="messages", value="messages"),
+    discord.app_commands.Choice(name="moderation", value="moderation"),
+    discord.app_commands.Choice(name="ticket", value="ticket"),
+    discord.app_commands.Choice(name="vocal", value="vocal"),
+    discord.app_commands.Choice(name="securite", value="securite")
+])
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.TextChannel):
+    config.CONFIG.setdefault("logs", {})[type] = salon.id
+    embed = discord.Embed(
+        title="📌 Configuration des logs",
+        description=f"Le type **{type}** sera envoyé dans {salon.mention}.",
+        color=0x2f3136,
+        timestamp=discord.utils.utcnow()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="scan-deleted", description="Récupère les suppressions récentes manquées")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def scan_deleted(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    count = 0
+    async for entry in interaction.guild.audit_logs(action=discord.AuditLogAction.message_delete, limit=50):
+        if (discord.utils.utcnow() - entry.created_at).total_seconds() > 300:
+            break
+        embed = discord.Embed(
+            title="🗑️ Message supprimé (récupéré)",
+            description=f"**Auteur** : {entry.target}\n**Supprimé par** : {entry.user}",
+            color=0xff8800,
+            timestamp=entry.created_at
+        )
+        await send_log_to(bot, "messages", embed)
+        count += 1
+    await interaction.followup.send(f"✅ {count} suppressions récupérées.", ephemeral=True)
+
+@bot.tree.command(name="add-cat-log", description="Crée une catégorie complète de salons de surveillance")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def add_cat_log(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
+    for category in guild.categories:
+        if "log" in category.name.lower() or "surveillance" in category.name.lower():
+            await interaction.followup.send(
+                f"❌ Une catégorie de logs existe déjà : **{category.name}**",
+                ephemeral=True
+            )
+            return
+
+    try:
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+
+        category = await guild.create_category(
+            name="𓆩𖤍𓆪۰⟣ SURVEILLANCES ⟢۰𓆩𖤍𓆪",
+            overwrites=overwrites
+        )
+
+        salon_configs = [
+            ("📜・messages", "messages"),
+            ("🎤・vocal", "vocal"),
+            ("🎫・tickets", "ticket"),
+            ("🛠️・commandes", "commands"),
+            ("👑・rôles", "moderation"),
+            ("📛・profil", "profile"),
+            ("🔍・contenu", "content"),
+            ("🚨・alertes", "alerts"),
+            ("⚖️・sanctions", "sanctions"),
+            ("🎉・giveaway", "giveaway"),
+            ("💥・bavures", "bavures")
+        ]
+
+        channel_ids = {}
+        for name, key in salon_configs:
+            log_overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                guild.me: discord.PermissionOverwrite(
+                    read_messages=True, 
+                    send_messages=True,
+                    manage_messages=True
+                )
+            }
+            channel = await guild.create_text_channel(name=name, category=category, overwrites=log_overwrites)
+            channel_ids[key] = channel.id
+
+        if not isinstance(config.CONFIG, dict):
+            config.CONFIG = {}
+        config.CONFIG.setdefault("logs", {})
+        config.CONFIG["logs"].update(channel_ids)
+
+        await interaction.followup.send(
+            f"✅ Catégorie **{category.name}** créée avec {len(salon_configs)} salons !",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="create-categorie", description="Crée une catégorie personnalisée")
+@discord.app_commands.describe(nom="Nom de la catégorie")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def create_categorie(interaction: discord.Interaction, nom: str):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    
+    try:
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+        category = await guild.create_category(name=nom, overwrites=overwrites)
+        await interaction.followup.send(
+            f"✅ Catégorie **{category.name}** créée avec succès !\nID : `{category.id}`",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="create-salon", description="Crée un salon dans une catégorie")
+@discord.app_commands.describe(
+    nom="Nom du salon",
+    categorie="Catégorie où créer le salon"
+)
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def create_salon(interaction: discord.Interaction, nom: str, categorie: discord.CategoryChannel):
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        channel = await categorie.create_text_channel(name=nom)
+        await interaction.followup.send(
+            f"✅ Salon **#{channel.name}** créé dans **{categorie.name}** !\nID : `{channel.id}`",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE SALON ===
+# ============================
+
+@bot.tree.command(name="clear-salon", description="Supprime tous les messages du salon")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def clear_salon(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=1000)
+    await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=True)
+
+@bot.tree.command(name="delete-salon", description="Supprime un salon")
+@discord.app_commands.describe(salon="Salon à supprimer")
+@discord.app_commands.checks.has_permissions(manage_channels=True)
+async def delete_salon(interaction: discord.Interaction, salon: discord.TextChannel):
+    await salon.delete(reason=f"Supprimé par {interaction.user}")
+    await interaction.response.send_message(f"✅ Salon **{salon.name}** supprimé.", ephemeral=True)
+
+@bot.tree.command(name="delete-categorie", description="Supprime une catégorie et ses salons")
+@discord.app_commands.describe(categorie="Catégorie à supprimer")
+@discord.app_commands.checks.has_permissions(manage_channels=True)
+async def delete_categorie(interaction: discord.Interaction, categorie: discord.CategoryChannel):
+    await interaction.response.send_message("✅ Suppression en cours...", ephemeral=True)
+    for channel in categorie.channels:
+        try:
+            await channel.delete(reason=f"Supprimé avec la catégorie par {interaction.user}")
+        except:
+            pass
+    try:
+        await categorie.delete(reason=f"Supprimé par {interaction.user}")
+    except:
+        pass
+
+@bot.tree.command(name="say", description="Envoie un message dans un salon")
+@discord.app_commands.describe(salon="Salon cible", contenu="Message à envoyer")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def say(interaction: discord.Interaction, salon: discord.TextChannel, contenu: str):
+    contenu_nettoye = contenu.replace("\\n", "\n")
+    await salon.send(contenu_nettoye)
+    await interaction.response.send_message(f"✅ Message envoyé dans {salon.mention}.", ephemeral=True)
+
+
+# ============================
+# === COMMANDES DE MODÉRATION ===
+# ============================
+
+@bot.tree.command(name="kick", description="Expulse un membre")
+@discord.app_commands.describe(pseudo="Membre à expulser", raison="Raison du kick")
+@discord.app_commands.checks.has_permissions(kick_members=True)
+async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison: str = "Aucune raison"):
+    if est_bavure_raison(raison):
+        embed = discord.Embed(
+            title="⚠️ Bavure détectée",
+            description=f"**Modérateur** : {interaction.user.mention}\n**Cible** : {pseudo.mention}\n**Commande** : /kick\n**Raison** : *{raison}*",
+            color=0xff6600,
+            timestamp=discord.utils.utcnow()
+        )
+        await send_log_to(bot, "bavures", embed)
+        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=True)
+        return
+
+    try:
+        await pseudo.send(f"⚠️ Vous avez été expulsé de **{interaction.guild.name}** pour : **{raison}**.")
+    except:
+        pass
+    await pseudo.kick(reason=raison)
+    embed = discord.Embed(
+        title="👢 Kick",
+        description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
+        color=0xff9900,
+        timestamp=datetime.utcnow()
+    )
+    ch = get_sanction_channel(bot)
+    if ch: 
+        await ch.send(embed=embed)
+    await interaction.response.send_message(f"✅ {pseudo.mention} expulsé.", ephemeral=True)
+
+@bot.tree.command(name="ban", description="Bannit un membre")
+@discord.app_commands.describe(pseudo="Membre à bannir", temps="Jours de suppression des messages (0 = aucun)", raison="Raison du ban")
+@discord.app_commands.checks.has_permissions(ban_members=True)
+async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: int = 0, raison: str = "Aucune raison"):
+    if est_bavure_raison(raison):
+        embed = discord.Embed(
+            title="⚠️ Bavure détectée",
+            description=f"**Modérateur** : {interaction.user.mention}\n**Cible** : {pseudo.mention}\n**Commande** : /ban\n**Raison** : *{raison}*",
+            color=0xff6600,
+            timestamp=discord.utils.utcnow()
+        )
+        await send_log_to(bot, "bavures", embed)
+        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=True)
+        return
+
+    try:
+        await pseudo.send(f"⚠️ Vous avez été banni de **{interaction.guild.name}** pour : **{raison}**.")
+    except:
+        pass
+    await pseudo.ban(reason=raison, delete_message_days=temps)
+    embed = discord.Embed(
+        title="🔨 Ban",
+        description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
+        color=0xff0000,
+        timestamp=datetime.utcnow()
+    )
+    ch = get_sanction_channel(bot)
+    if ch: 
+        await ch.send(embed=embed)
+    await interaction.response.send_message(f"✅ {pseudo.mention} banni.", ephemeral=True)
+
+@bot.tree.command(name="warn", description="Avertit un membre")
+@discord.app_commands.describe(pseudo="Membre à avertir", raison="Raison de l'avertissement")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison: str = "Aucune raison"):
+    if est_bavure_raison(raison):
+        embed = discord.Embed(
+            title="⚠️ Bavure détectée",
+            description=f"**Modérateur** : {interaction.user.mention}\n**Cible** : {pseudo.mention}\n**Commande** : /warn\n**Raison** : *{raison}*",
+            color=0xff6600,
+            timestamp=discord.utils.utcnow()
+        )
+        await send_log_to(bot, "bavures", embed)
+        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="⚠️ Avertissement",
+        description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
+        color=0xffff00,
+        timestamp=discord.utils.utcnow()
+    )
+    ch = get_sanction_channel(bot)
+    if ch: 
+        await ch.send(embed=embed)
+    await interaction.response.send_message(f"✅ Avertissement envoyé.", ephemeral=True)
+
+@bot.tree.command(name="anti-spam", description="Active/désactive l'anti-spam")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def anti_spam(interaction: discord.Interaction, actif: bool):
+    config.CONFIG["security"]["anti_spam"] = actif
+    await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=True)
+
+@bot.tree.command(name="anti-raid", description="Active/désactive l'anti-raid")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def anti_raid(interaction: discord.Interaction, actif: bool):
+    config.CONFIG["security"]["anti_raid"] = actif
+    await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=True)
+
+@bot.tree.command(name="anti-hack", description="Active/désactive l'anti-hack")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def anti_hack(interaction: discord.Interaction, actif: bool):
+    config.CONFIG["security"]["anti_hack"] = actif
+    await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=True)
+
+
+# Commande utilitaire pour forcer la synchronisation des commandes sur le serveur courant
+@bot.tree.command(name="sync", description="(Admin) Synchronise les commandes pour ce serveur")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def sync_commands(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    try:
+        if guild:
+            # Copier les commandes globales vers le guild et synchroniser
+            bot.tree.copy_global_to(guild=discord.Object(id=guild.id))
+            synced = await bot.tree.sync(guild=discord.Object(id=guild.id))
+            await interaction.followup.send(f"✅ {len(synced)} commandes synchronisées pour ce serveur.", ephemeral=True)
+        else:
+            synced = await bot.tree.sync()
+            await interaction.followup.send(f"✅ {len(synced)} commandes globales synchronisées.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Échec de la sync: {e}", ephemeral=True)
+
+
+# ============================
 # === COMMANDES DE SAUVEGARDE ===
 # ============================
 
