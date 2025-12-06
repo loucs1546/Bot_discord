@@ -1225,114 +1225,18 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
 # === COMMANDES D'ASSISTANCE ===
 # ============================
 
-@bot.tree.command(name="aide", description="Obtenir de l'aide sur les commandes")
-async def aide(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🆘 Aide - Commandes Seiko",
-        description="Voici quelques-unes des commandes disponibles :",
-        color=0x5865F2
-    )
-    
-    # Ajouter les commandes de manière dynamique
-    for command in bot.tree.get_commands():
-        if command.parent is None:  # Seulement les commandes de premier niveau
-            embed.add_field(
-                name=f"/{command.name}",
-                value=command.description or "Pas de description",
-                inline=False
-            )
-    
-    embed.set_footer(text="Utilisez /help <commande> pour plus de détails sur une commande.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+# --- SUPPRIMÉ : commande /aide (remplacée) ---
+# La commande /aide a été supprimée à la demande.
 
-
-@bot.tree.command(name="help", description="Obtenir de l'aide sur une commande spécifique")
-@discord.app_commands.describe(commande="La commande sur laquelle vous avez besoin d'aide")
-async def help_cmd(interaction: discord.Interaction, commande: str):
-    command = bot.tree.get_command(commande)
-    if command:
-        embed = discord.Embed(
-            title=f"🆘 Aide - Commande /{command.name}",
-            description=command.description or "Pas de description",
-            color=0x5865F2
-        )
-        # Ajouter les détails de la commande ici si nécessaire
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Commande inconnue.", ephemeral=True)
-
+# --- SUPPRIMÉ : commande /help (remplacée) ---
+# La commande /help a été supprimée à la demande.
 
 # ============================
 # === COMMANDES DE TEST ===
 # ============================
 
-@bot.tree.command(name="test-embed", description="Envoyer un embed de test")
-async def test_embed(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="Ceci est un test",
-        description="Ceci est un embed de test pour vérifier la mise en forme.",
-        color=0x3498db
-    )
-    embed.add_field(name="Champ 1", value="Ceci est le champ 1", inline=True)
-    embed.add_field(name="Champ 2", value="Ceci est le champ 2", inline=True)
-    embed.set_footer(text="Ceci est un pied de page")
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="test-button", description="Envoyer un message avec un bouton de test")
-async def test_button(interaction: discord.Interaction):
-    view = discord.ui.View()
-    view.add_item(discord.ui.Button(label="Cliquez-moi!", style=discord.ButtonStyle.primary))
-    
-    await interaction.response.send_message("Voici un bouton de test:", view=view, ephemeral=True)
-
-@bot.tree.command(name="test-select", description="Envoyer un message avec un menu déroulant de test")
-async def test_select(interaction: discord.Interaction):
-    select = discord.ui.Select(
-        placeholder="Choisissez une option...",
-        options=[
-            discord.SelectOption(label="Option 1", value="1"),
-            discord.SelectOption(label="Option 2", value="2"),
-            discord.SelectOption(label="Option 3", value="3")
-        ]
-    )
-    
-    async def select_callback(interaction: discord.Interaction):
-        await interaction.response.send_message(f"Vous avez sélectionné l'option {select.values[0]}", ephemeral=True)
-    
-    select.callback = select_callback
-    
-    view = discord.ui.View()
-    view.add_item(select)
-    
-    await interaction.response.send_message("Voici un menu déroulant de test:", view=view, ephemeral=True)
-
-
-# ============================
-# === COMMANDES DE DEBUG ===
-# ============================
-
-@bot.tree.command(name="debug-sentry", description="Tester l'envoi d'une erreur à Sentry")
-async def debug_sentry(interaction: discord.Interaction):
-    try:
-        division_par_zero = 1 / 0  # Ceci va causer une exception
-    except Exception as e:
-        await interaction.response.send_message("✅ Erreur capturée et envoyée à Sentry.", ephemeral=True)
-        import sentry_sdk
-        sentry_sdk.capture_exception(e)
-    else:
-        await interaction.response.send_message("❌ Aucune erreur n'a été levée.", ephemeral=True)
-
-
-@bot.tree.command(name="debug-log", description="Envoyer un message de log personnalisé")
-@discord.app_commands.describe(message="Le message à envoyer dans les logs")
-async def debug_log(interaction: discord.Interaction, message: str):
-    try:
-        await send_log_to(bot, "commands", f"Log de debug: {message}")
-        await interaction.response.send_message("✅ Message de log envoyé.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Erreur lors de l'envoi du log: {e}", ephemeral=True)
-
+# --- SUPPRIMÉ : test-embed, test-button, test-select ---
+# Les commandes de test ont été retirées (test-embed, test-button, test-select).
 
 # ============================
 # === COMMANDES GÉNÉRALES (suite) ===
@@ -1352,8 +1256,31 @@ async def about(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
-async def invite(interaction: discord.Interaction):
-    await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
+# --- SUPPRIMÉ : commande /invite ---
+# La commande /invite a été supprimée à la demande.
+
+# === AJOUT : commande /start (ouvre l'interface de configuration) ===
+@bot.tree.command(name="start", description="Tutoriel de configuration du serveur")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def start_setup(interaction: discord.Interaction):
+    """Démarre le tutoriel / setup. Ouvre l'interface de configuration (TicketConfigView)."""
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
+
+    embed = discord.Embed(
+        title="🎓 Setup Seiko",
+        description="Bienvenue ! Lancez la configuration du serveur. Utilisez les boutons et modales pour définir les options.",
+        color=0x3498db,
+        timestamp=discord.utils.utcnow()
+    )
+
+    # TicketConfigView accepte source_channel pour envoyer le guide si nécessaire
+    try:
+        await interaction.followup.send(embed=embed, view=TicketConfigView(source_channel=interaction.channel), ephemeral=True)
+    except Exception:
+        # fallback simple
+        await interaction.followup.send("✅ Interface de configuration ouverte.", ephemeral=True)
 
 bot.run(config.DISCORD_TOKEN)
