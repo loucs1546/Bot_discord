@@ -247,76 +247,61 @@ class TicketChoiceView(discord.ui.View):
         select.callback = select_callback
         self.add_item(select)
     
-    @discord.ui.button(label="📩 Créer le Ticket", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="📩 Créer le Ticket", style=discord.ButtonStyle.success, emoji="🎫")
     async def create_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.selected_option:
             await interaction.response.send_message("❌ Sélectionnez un type de ticket d'abord.", ephemeral=True)
             return
-        
         guild = self.guild or interaction.guild
         user = interaction.user
-        
-        # Vérifier qu'il n'a pas déjà un ticket
-        for channel in guild.channels:
-            if channel.name.startswith("ticket-") and str(user.id) in channel.name:
+        # Vérifier ticket existant
+        for ch in guild.channels:
+            if ch.name.startswith(f"{self.selected_option.lower().replace(' ', '-')}-{user.name.lower()}"):
                 await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
                 return
-        
-        # Incrémenter le counter
-        config.CONFIG.setdefault("ticket_systems", {}).setdefault(self.ticket_system, {}).setdefault("counter", 0)
-        ticket_num = config.CONFIG["ticket_systems"][self.ticket_system]["counter"] + 1
-        config.CONFIG["ticket_systems"][self.ticket_system]["counter"] = ticket_num
-        
-        # Créer le channel ticket-XXXXXX
-        ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
-        
+        # Générer nom propre
+        clean_type = re.sub(r"[^a-zA-Z0-9\-]", "", self.selected_option.lower())
+        clean_user = re.sub(r"[^a-zA-Z0-9\-]", "", user.name.lower())
+        base_name = f"{clean_type}-{clean_user}"
+        ticket_name = base_name[:95]
+        counter = 1
+        while discord.utils.get(guild.channels, name=ticket_name):
+            ticket_name = f"{base_name}-{counter}"
+            counter += 1
+            if counter > 10:
+                ticket_name = f"ticket-{user.id}"
+                break
+        # Permissions
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=False,
-                embed_links=False
-            ),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
         }
-        
         try:
-            ticket_channel = await guild.create_text_channel(
-                name=ticket_name,
-                overwrites=overwrites,
-                reason=f"Ticket créé par {user} ({self.selected_option})"
-            )
+            ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites)
         except Exception as e:
             await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
             return
-        
-        # Envoyer le message du bot avec les boutons de gestion
+        # Message initial
         embed = discord.Embed(
-            title=f"🎟️ {self.selected_option} - #{ticket_num:06d}",
-            description=f"Bonjour {user.mention},\n\n📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n\n> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.",
+            title=f"🎟️ {self.selected_option}",
+            description=f"Bonjour {user.mention},\nUn membre de l’équipe vous répondra bientôt.",
             color=0x5865F2,
             timestamp=datetime.utcnow()
         )
         embed.set_footer(text="Seiko Security • Système de tickets")
-        
-        view = TicketManagementView(user.id, ticket_num)
-        msg = await ticket_channel.send(embed=embed, view=view)
-        
-        # Log
+        view = TicketManagementView(user.id, self.selected_option)
+        await ticket_channel.send(embed=embed, view=view)
+        # Logs création
         log_embed = discord.Embed(
             title="🎟️ Ticket créé",
-            description=f"**Utilisateur** : {user.mention} (`{user}`)\n**Type** : {self.selected_option}\n**Ticket** : {ticket_channel.mention}",
+            description=f"**Utilisateur** : {user.mention}\n**Type** : {self.selected_option}\n**Salon** : {ticket_channel.mention}",
             color=0x00ff00,
             timestamp=datetime.utcnow()
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
-        
-        await interaction.response.send_message(
-            f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{self.selected_option}**",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
 
 
 class TicketManagementView(discord.ui.View):
@@ -400,46 +385,57 @@ class TicketManagementView(discord.ui.View):
         )
         
         class ConfirmDeleteView(discord.ui.View):
-            def __init__(self, ticket_channel, owner_id=None, ticket_num=None):
-                super().__init__(timeout=5)
-                self.ticket_channel = ticket_channel
-                self.owner_id = owner_id
-                self.ticket_num = ticket_num
-            
-            @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
-            async def confirm_delete(self, confirm_interaction: discord.Interaction, confirm_button: discord.ui.Button):
-                await confirm_interaction.response.defer()
-                # Envoyer un récap/log avant suppression
-                try:
-                    owner = None
-                    owner_id = getattr(self, 'owner_id', None)
-                    if owner_id:
-                        owner = confirm_interaction.guild.get_member(owner_id)
+        def __init__(self, ticket_channel, owner_id=None):
+            super().__init__(timeout=5)
+            self.ticket_channel = ticket_channel
+            self.owner_id = owner_id
 
-                    embed_del = discord.Embed(
-                        title="🗑️ Ticket supprimé",
-                        description=f"**Salon**: {self.ticket_channel.name}\n**Supprimé par**: {confirm_interaction.user.mention}",
-                        color=0xe74c3c,
-                        timestamp=datetime.utcnow()
-                    )
-                    if owner:
-                        embed_del.add_field(name="Propriétaire", value=f"{owner.mention} (`{owner}`)")
-                    if getattr(self, 'ticket_num', None):
-                        embed_del.set_footer(text=f"Ticket #{int(self.ticket_num):06d}")
+        @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
+        async def confirm_delete(self, confirm_interaction: discord.Interaction, confirm_button: discord.ui.Button):
+            await confirm_interaction.response.defer()
+            # Récupérer tout l'historique du salon
+            messages = []
+            async for msg in self.ticket_channel.history(limit=1000, oldest_first=True):
+                if msg.author == confirm_interaction.client.user and msg.embeds:
+                    continue  # ignorer le message initial du bot
+                content = f"[{msg.created_at.strftime('%H:%M')}] **{msg.author}**: {msg.content or '(aucun texte)'}"
+                if msg.attachments:
+                    urls = ", ".join([a.url for a in msg.attachments])
+                    content += f"\n📎 Fichiers : {urls}"
+                messages.append(content)
+            full_log = "\n".join(messages) or "Aucun message dans le ticket."
+            if len(full_log) > 4000:
+                full_log = full_log[:3997] + "..."
 
-                    await send_log_to(bot, "ticket", embed_del)
-                except Exception:
-                    pass
+            # Envoyer dans #🎫・tickets
+            log_channel = discord.utils.get(confirm_interaction.guild.text_channels, name="🎫・tickets")
+            if log_channel:
+                embed = discord.Embed(
+                    title=f"🗂️ Historique ticket - {self.ticket_channel.name}",
+                    description=full_log,
+                    color=0x5865F2,
+                    timestamp=datetime.utcnow()
+                )
+                owner = confirm_interaction.guild.get_member(self.owner_id) if self.owner_id else None
+                if owner:
+                    embed.set_author(name=f"Créé par {owner}", icon_url=owner.display_avatar.url)
+                await log_channel.send(embed=embed)
 
-                try:
-                    await self.ticket_channel.delete()
-                except Exception:
-                    pass
-            
-            @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
-            async def cancel_delete(self, cancel_interaction: discord.Interaction, cancel_button: discord.ui.Button):
-                await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=True)
-        
+            # Log fermeture
+            log_embed = discord.Embed(
+                title="🔒 Ticket fermé",
+                description=f"**Fermé par** : {confirm_interaction.user.mention}\n**Salon** : `{self.ticket_channel.name}`",
+                color=0xff0000,
+                timestamp=datetime.utcnow()
+            )
+            await send_log_to(confirm_interaction.client, "ticket", log_embed)
+
+            await self.ticket_channel.delete()
+
+        @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
+        async def cancel_delete(self, cancel_interaction: discord.Interaction, cancel_button: discord.ui.Button):
+            await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=True)        
+
         await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=True)
 
 
@@ -641,121 +637,95 @@ async def ping(interaction: discord.Interaction):
 #=============================
 
 
-@bot.tree.command(name="start", description="Démarrer la configuration complète du serveur")
+@bot.tree.command(name="start", description="Configurer complètement le bot pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def start_config(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
     guild = interaction.guild
 
-    # Étape 1 : Salon d'accueil
-    welcome_channel = await prompt_channel(interaction, "salon d'accueil (arrivée)")
-    if not welcome_channel:
-        return
-    config.CONFIG.setdefault("channels", {})["welcome"] = welcome_channel.id
+    welcome = await wait_for_channel_mention(interaction, guild, "salon d’accueil")
+    if not welcome: return
+    config.CONFIG.setdefault("channels", {})["welcome"] = welcome.id
 
-    # Étape 2 : Salon de départ
-    leave_channel = await prompt_channel(interaction, "salon de départ (départ)")
-    if not leave_channel:
-        return
-    config.CONFIG.setdefault("channels", {})["leave"] = leave_channel.id
+    leave = await wait_for_channel_mention(interaction, guild, "salon de départ")
+    if not leave: return
+    config.CONFIG["channels"]["leave"] = leave.id
 
-    # Étape 3 : Rôle par défaut
-    default_role = await prompt_role(interaction, "rôle par défaut pour les nouveaux membres")
-    if not default_role:
-        return
+    default_role = await wait_for_role_mention(interaction, guild, "rôle par défaut")
+    if not default_role: return
     config.CONFIG.setdefault("roles", {})["default"] = default_role.id
 
-    # Étape 4 : Rôles staff
-    founder_role = await prompt_role(interaction, "rôle fondateur")
-    admin_role = await prompt_role(interaction, "rôle administrateur")
-    mod_role = await prompt_role(interaction, "rôle modérateur")
+    support_role = await wait_for_role_mention(interaction, guild, "rôle support")
+    if not support_role: return
+    config.CONFIG["roles"]["support"] = support_role.id
 
-    if founder_role:
-        config.CONFIG["roles"]["founder"] = founder_role.id
-    if admin_role:
-        config.CONFIG["roles"]["admin"] = admin_role.id
-    if mod_role:
-        config.CONFIG["roles"]["moderator"] = mod_role.id
+    founder_role = await wait_for_role_mention(interaction, guild, "rôle fondateur")
+    if not founder_role: return
+    config.CONFIG["roles"]["founder"] = founder_role.id
 
-    # Étape 5 : Système de tickets
-    ticket_mode_view = TicketModeChoiceView()
-    await interaction.followup.send(
-        "🎟️ **Configuration des tickets**\nChoisissez le mode :", 
-        view=ticket_mode_view,
-        ephemeral=True
-    )
-    await ticket_mode_view.wait()
-    if not hasattr(ticket_mode_view, "chosen_mode"):
-        return
-    mode = ticket_mode_view.chosen_mode
-    config.CONFIG.setdefault("ticket_systems", {})["default"] = {
-        "mode": mode,
-        "options": ["Support Général", "Bug Report", "Suggestion", "Autre"] if mode == "basic" else [],
-        "counter": 0
-    }
+    admin_role = await wait_for_role_mention(interaction, guild, "rôle administrateur")
+    if not admin_role: return
+    config.CONFIG["roles"]["admin"] = admin_role.id
 
-    # Étape 6 : Vérifier les logs
-    required_logs = ["messages", "moderation", "ticket", "vocal", "securite", "sanctions"]
-    missing_logs = []
-    for log_type in required_logs:
-        if not config.CONFIG.get("logs", {}).get(log_type):
-            missing_logs.append(log_type)
+    # Tickets
+    await interaction.channel.send("🎟️ **Configuration des tickets**")
+    view = TicketModeChoiceView()
+    msg = await interaction.channel.send("Basique ou avancé ?", view=view)
+    await view.wait()
+    if not hasattr(view, "chosen_mode"): return
+    mode = view.chosen_mode
+    options = await collect_ticket_options(interaction, guild) if mode == "advanced" else ["Support Général"]
+    config.CONFIG.setdefault("ticket_systems", {})["default"] = {"mode": mode, "options": options}
 
-    if missing_logs:
-        await interaction.followup.send(
-            f"⚠️ **Salons de logs manquants** : {', '.join(missing_logs)}\n"
-            f"Merci d'exécuter `/add-cat-log` pour créer une catégorie complète.",
-            ephemeral=True
-        )
-        cont_view = ContinueButtonView()
-        await interaction.followup.send("Cliquez sur **Continuer** lorsque c'est fait :", view=cont_view, ephemeral=True)
-        await cont_view.wait()
+    # Logs
+    missing = await check_required_logs(guild)
+    if missing:
+        await interaction.channel.send(f"⚠️ Salons manquants : {', '.join(missing)}\n➡️ Utilisez `/add-cat-log`.")
 
-    # Étape 7 : Sécurité
+    # Sécurité
+    await interaction.channel.send("🛡️ **Sécurité**")
     sec_view = SecurityConfigView()
-    await interaction.followup.send("🛡️ **Sécurité**\nActivez les systèmes de protection :", view=sec_view, ephemeral=True)
+    sec_msg = await interaction.channel.send("Activez les protections :", view=sec_view)
     await sec_view.wait()
 
-    # Sauvegarder
-    try:
-        await save_guild_config(guild, config.CONFIG)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Erreur sauvegarde : {e}", ephemeral=True)
-
-    # Créer le fichier POUR_TOI.txt
-    pour_toi_content = f"""
-Bienvenue sur Seiko Security !
-
-Voici comment utiliser votre bot :
-
-✅ Configuration terminée !
-- Salons d'accueil/départ : configurés
-- Rôles : attribués
-- Système de tickets : {'Basique' if mode == 'basic' else 'Avancé'}
-- Sécurité : {'activée' if sec_view.anti_spam else 'désactivée'}
-
-🔧 Commandes utiles :
-/start → Reconfigurer
-/ticket-config → Gérer les panels de tickets
-/ticket-panel → Envoyer un panel public
-/add-cat-log → Créer les salons de logs
-/logs <type> <salon> → Rediriger un type de log
-/anti-spam, /anti-raid, /anti-hack → Basculer la sécurité
-
-📁 Ce serveur est sauvegardé automatiquement dans #sauvegarde.
-"""
-    pour_toi_file = discord.File(io.BytesIO(pour_toi_content.encode("utf-8")), filename="POUR_TOI.txt")
-    await interaction.followup.send("✅ Configuration terminée ! Voici votre guide :", file=pour_toi_file, ephemeral=True)
-
-    # Sauvegarde dans #sauvegarde
-    backup_channel = discord.utils.get(guild.text_channels, name="sauvegarde")
-    if not backup_channel:
+    # Sauvegarde
+    save_ch = discord.utils.get(guild.text_channels, name="📁-sauvegarde")
+    if not save_ch:
         overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
-        backup_channel = await guild.create_text_channel("sauvegarde", overwrites=overwrites)
-    import json
-    save_data = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
-    save_file = discord.File(io.BytesIO(save_data.encode("utf-8")), filename=f"config_{guild.id}.json")
-    await backup_channel.send(f"💾 Sauvegarde auto - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}", file=save_file)
+        save_ch = await guild.create_text_channel("📁-sauvegarde", overwrites=overwrites)
+    data = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+    await save_ch.send("💾 **Sauvegarde post-`/start`**", file=discord.File(io.BytesIO(data.encode()), filename="config.json"))
+
+    await interaction.channel.send(
+        "✅ **Configuration terminée !**\n"
+        "📄 Utilisez `/configs` pour modifier la configuration à tout moment."
+    )
+
+@bot.tree.command(name="configs", description="Modifier la configuration actuelle")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def configs(interaction: discord.Interaction):
+    class ConfigMainView(discord.ui.View):
+        @discord.ui.button(label="👥 Rôles & Salons", style=discord.ButtonStyle.primary, emoji="👥")
+        async def roles_btn(self, i, _):
+            await i.response.send_message("...", view=ConfigRolesView(), ephemeral=True)
+        @discord.ui.button(label="📜 Logs", style=discord.ButtonStyle.secondary, emoji="📜")
+        async def logs_btn(self, i, _):
+            await i.response.send_message("...", view=ConfigLogsView(), ephemeral=True)
+        @discord.ui.button(label="🛡️ Sécurité", style=discord.ButtonStyle.danger, emoji="🛡️")
+        async def sec_btn(self, i, _):
+            await i.response.send_message("...", view=SecurityConfigView(), ephemeral=True)
+    await interaction.response.send_message("🔧 **Modifier la configuration**", view=ConfigMainView(), ephemeral=True)
+
+class ConfigRolesView(discord.ui.View):
+    @discord.ui.button(label="🔄 Réinitialiser rôles", style=discord.ButtonStyle.danger)
+    async def reset(self, i, _):
+        config.CONFIG["roles"] = {}
+        await i.response.send_message("✅ Rôles réinitialisés. Utilisez `/start` pour les reconfigurer.", ephemeral=True)
+
+class ConfigLogsView(discord.ui.View):
+    @discord.ui.button(label="🔄 Recréer logs", style=discord.ButtonStyle.danger)
+    async def reset(self, i, _):
+        await i.response.send_message("Utilisez `/add-cat-log` pour recréer les salons.", ephemeral=True)
 
 # === UTILITAIRES POUR /start ===
 
@@ -793,17 +763,15 @@ class TicketModeChoiceView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
         self.chosen_mode = None
-
     @discord.ui.button(label="Basique", style=discord.ButtonStyle.success)
-    async def basic(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def basic(self, i, _):
         self.chosen_mode = "basic"
-        await interaction.response.send_message("✅ Mode basique sélectionné.", ephemeral=True)
+        await i.response.defer()
         self.stop()
-
     @discord.ui.button(label="Avancé", style=discord.ButtonStyle.primary)
-    async def advanced(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def advanced(self, i, _):
         self.chosen_mode = "advanced"
-        await interaction.response.send_message("✅ Mode avancé sélectionné.", ephemeral=True)
+        await i.response.defer()
         self.stop()
 
 class ContinueButtonView(discord.ui.View):
@@ -817,36 +785,24 @@ class ContinueButtonView(discord.ui.View):
 
 class SecurityConfigView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=120)
-        self.anti_spam = False
-        self.anti_raid = False
-        self.anti_hack = False
-
-    @discord.ui.button(label="Anti-Spam", style=discord.ButtonStyle.secondary)
-    async def toggle_spam(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.anti_spam = not self.anti_spam
-        button.style = discord.ButtonStyle.success if self.anti_spam else discord.ButtonStyle.secondary
-        config.CONFIG.setdefault("security", {})["anti_spam"] = self.anti_spam
-        await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(label="Anti-Raid", style=discord.ButtonStyle.secondary)
-    async def toggle_raid(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.anti_raid = not self.anti_raid
-        button.style = discord.ButtonStyle.success if self.anti_raid else discord.ButtonStyle.secondary
-        config.CONFIG.setdefault("security", {})["anti_raid"] = self.anti_raid
-        await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(label="Anti-Hack", style=discord.ButtonStyle.secondary)
-    async def toggle_hack(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.anti_hack = not self.anti_hack
-        button.style = discord.ButtonStyle.success if self.anti_hack else discord.ButtonStyle.secondary
-        config.CONFIG.setdefault("security", {})["anti_hack"] = self.anti_hack
-        await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(label="Terminer", style=discord.ButtonStyle.green)
-    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("✅ Sécurité configurée.", ephemeral=True)
-        self.stop()
+        super().__init__(timeout=300)
+        self.anti_spam = config.CONFIG.get("security", {}).get("anti_spam", False)
+        self.anti_raid = config.CONFIG.get("security", {}).get("anti_raid", False)
+        self.anti_hack = config.CONFIG.get("security", {}).get("anti_hack", False)
+        self.update_buttons()
+    def update_buttons(self):
+        self.clear_items()
+        self.add_item(self._make_button("Anti-Spam", self.anti_spam, self.toggle_spam))
+        self.add_item(self._make_button("Anti-Raid", self.anti_raid, self.toggle_raid))
+        self.add_item(self._make_button("Anti-Hack", self.anti_hack, self.toggle_hack))
+        self.add_item(discord.ui.Button(label="✅ Terminer", style=discord.ButtonStyle.green, custom_id="finish"))
+    def _make_button(self, label, enabled, callback):
+        btn = discord.ui.Button(label=label, style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary)
+        btn.callback = callback
+        return btn
+    async def toggle_spam(self, i): self.anti_spam = not self.anti_spam; config.CONFIG.setdefault("security", {})["anti_spam"] = self.anti_spam; self.update_buttons(); await i.response.edit_message(view=self)
+    async def toggle_raid(self, i): self.anti_raid = not self.anti_raid; config.CONFIG.setdefault("security", {})["anti_raid"] = self.anti_raid; self.update_buttons(); await i.response.edit_message(view=self)
+    async def toggle_hack(self, i): self.anti_hack = not self.anti_hack; config.CONFIG.setdefault("security", {})["anti_hack"] = self.anti_hack; self.update_buttons(); await i.response.edit_message(view=self)
 
 
 # ============================
@@ -1117,6 +1073,7 @@ class TicketOptionsModal(discord.ui.Modal, title="Options personnalisées"):
         except Exception:
             pass
 
+
 @bot.tree.command(name="ticket-panel", description="Envoie un panneau public de création de ticket")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
@@ -1124,15 +1081,14 @@ async def ticket_panel(interaction: discord.Interaction):
     if not systems:
         await interaction.response.send_message("❌ Aucun système de ticket configuré. Utilisez `/ticket-config`.", ephemeral=True)
         return
-
     if len(systems) == 1:
-        sys_name = list(systems.keys())[0]
+        sys_name = next(iter(systems))
         await send_public_ticket_panel(interaction, sys_name)
-        await interaction.response.send_message(f"✅ Panel pour **{sys_name}** envoyé.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Panel **{sys_name}** envoyé.", ephemeral=True)
     else:
-        # Plusieurs systèmes → choix éphémère
         view = TicketSystemChoiceView(systems, interaction.channel)
         await interaction.response.send_message("Choisissez le système de ticket à afficher publiquement :", view=view, ephemeral=True)
+
 
 class TicketSystemChoiceView(discord.ui.View):
     def __init__(self, systems: dict, target_channel: discord.TextChannel):
@@ -1145,10 +1101,9 @@ class TicketSystemSelectButton(discord.ui.Button):
     def __init__(self, sys_name: str):
         super().__init__(label=sys_name, style=discord.ButtonStyle.success)
         self.sys_name = sys_name
-
     async def callback(self, interaction: discord.Interaction):
         await send_public_ticket_panel(interaction, self.sys_name)
-        await interaction.response.send_message(f"✅ Panel **{self.sys_name}** envoyé dans {interaction.channel.mention}.", ephemeral=True)
+        await interaction.followup.send(f"✅ Panel **{self.sys_name}** envoyé dans {interaction.channel.mention}.", ephemeral=True)
         self.view.stop()
 
 async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: str):
@@ -1156,7 +1111,6 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
     sys_conf = systems.get(sys_name)
     if not sys_conf:
         return
-
     embed = discord.Embed(
         title="🎟️ Support - Créer un ticket",
         description="Sélectionnez le type de demande, puis cliquez sur **Créer le Ticket**.",
@@ -1164,7 +1118,6 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
         timestamp=discord.utils.utcnow()
     )
     embed.set_footer(text="Seiko Security • Système de tickets")
-
     view = TicketChoiceView(interaction.guild, sys_name)
     await interaction.channel.send(embed=embed, view=view)
 
