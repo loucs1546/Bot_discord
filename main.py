@@ -57,6 +57,50 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 cogs_loaded = False
 
 # === HELPERS ===
+
+# === UTILITAIRES TICKETS POUR /start ===
+class ContinueOptionView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.continue_adding = False
+    @discord.ui.button(label="✅ Oui", style=discord.ButtonStyle.success)
+    async def yes(self, i: discord.Interaction, _):
+        self.continue_adding = True
+        await i.response.defer()
+        self.stop()
+    @discord.ui.button(label="❌ Non", style=discord.ButtonStyle.danger)
+    async def no(self, i: discord.Interaction, _):
+        self.continue_adding = False
+        await i.response.defer()
+        self.stop()
+
+class TicketOptionCollectModal(discord.ui.Modal, title="Nouvelle option de ticket"):
+    def __init__(self, num):
+        super().__init__()
+        self.num = num
+        self.add_item(discord.ui.TextInput(label=f"Option {num}", placeholder="Support technique", max_length=50))
+    async def on_submit(self, interaction: discord.Interaction):
+        self.value = self.children[0].value.strip()
+        await interaction.response.defer()
+        self.stop()
+
+async def collect_ticket_options(interaction, guild):
+    options = []
+    while True:
+        modal = TicketOptionCollectModal(len(options) + 1)
+        await interaction.response.send_modal(modal)
+        await modal.wait()
+        if not modal.value:
+            break
+        options.append(modal.value)
+        cont_view = ContinueOptionView()
+        await interaction.followup.send("Ajouter une autre option ?", view=cont_view, ephemeral=False)
+        await cont_view.wait()
+        if not cont_view.continue_adding:
+            break
+    return options or ["Support Général"]
+
+
 def est_bavure_raison(raison: str) -> bool:
     if not raison or raison.strip().lower() in ("", "aucune raison"):
         return True
