@@ -1043,244 +1043,139 @@ class TicketConfigView(discord.ui.View):
                 print(f"[TicketConfig] Erreur envoi POUR_TOI.txt: {e}")
 
 
-# EVENTS : détecter changement de pseudo / nickname
-@bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
-	try:
-		if before.nick != after.nick:
-			embed = discord.Embed(title="✏️ Changement de pseudo (nickname)", color=0x3498db, timestamp=datetime.utcnow())
-			embed.add_field(name="Membre", value=f"{after.mention} (`{after}`)", inline=False)
-			embed.add_field(name="Avant", value=f"{before.nick or '(aucun)'}", inline=True)
-			embed.add_field(name="Après", value=f"{after.nick or '(aucun)'}", inline=True)
-			await send_log_to(bot, "profile", embed)
-		# username global change may trigger on_user_update instead
-	except Exception:
-		traceback.print_exc()
+# === AJOUT : VUES DE SETUP (Étapes pour la commande /start) ===
+class SetupStep0View(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
 
-@bot.event
-async def on_user_update(before: discord.User, after: discord.User):
-	try:
-		if before.name != after.name or before.discriminator != after.discriminator:
-			embed = discord.Embed(title="✏️ Changement de username", color=0x3498db, timestamp=datetime.utcnow())
-			embed.add_field(name="Utilisateur", value=f"{after} (`{after.id}`)", inline=False)
-			embed.add_field(name="Avant", value=f"{before.name}#{before.discriminator}", inline=True)
-			embed.add_field(name="Après", value=f"{after.name}#{after.discriminator}", inline=True)
-			# envoyer log globalement via send_log_to (implémentation utils.logging s'occupe du routage)
-			await send_log_to(bot, "profile", embed)
-	except Exception:
-		traceback.print_exc()
-
-# ============================
-# === COMMANDES D'AUDIT ===
-# ============================
-
-@bot.tree.command(name="reachlog", description="Affiche le dernier log d'audit")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def reachlog(interaction: discord.Interaction):
-    try:
-        async for entry in interaction.guild.audit_logs(limit=1):
-            log_msg = f"**{entry.action.name}**\n"
-            log_msg += f"**Cible** : {getattr(entry, 'target', 'Inconnue')}\n"
-            log_msg += f"**Auteur** : {entry.user}\n"
-            log_msg += f"**Date** : <t:{int(entry.created_at.timestamp())}:R>"
-            await interaction.response.send_message(log_msg, ephemeral=True)
-            return
-        await interaction.response.send_message("📭 Aucun log trouvé.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
-
-@bot.tree.command(name="reach-id", description="Résout un ID Discord")
-@discord.app_commands.describe(id="ID à résoudre")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def reach_id(interaction: discord.Interaction, id: str):
-    try:
-        obj_id = int(id)
-    except ValueError:
-        await interaction.response.send_message("❌ ID invalide. Doit être un nombre.", ephemeral=True)
-        return
-
-    guild = interaction.guild
-    results = []
-
-    member = guild.get_member(obj_id)
-    if member:
-        results.append(f"👤 **Membre** : {member.mention} (`{member}`)")
-
-    channel = guild.get_channel(obj_id)
-    if channel:
-        results.append(f"💬 **Salon** : {channel.mention} (`{channel.name}`)")
-
-    role = guild.get_role(obj_id)
-    if role:
-        results.append(f"👑 **Rôle** : {role.mention} (`{role.name}`)")
-
-    if results:
-        await interaction.response.send_message(
-            f"🔍 Résultats pour l'ID `{id}` :\n" + "\n".join(results),
-            ephemeral=True
+    @discord.ui.button(label="🎫 Sélectionner Rôle de Base", style=discord.ButtonStyle.primary)
+    async def select_base_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Étape 0/6",
+            description="Choisissez le rôle de base à donner à l'arrivée d'un nouveau membre",
+            color=0x3498db
         )
-    else:
-        await interaction.response.send_message(
-            f"❌ Aucun utilisateur, salon ou rôle trouvé avec l'ID `{id}`.",
-            ephemeral=True
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "default", next_view_factory=lambda g: SetupStep1View(g, self.source_channel), back_view_factory=lambda g: SetupStep0View(g, self.source_channel)))
+
+    @discord.ui.button(label="⏭️ Passer", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎓 Setup Seiko - Étape 1/6",
+            description="Rôles à configurer : Rôle Admin",
+            color=0x3498db
         )
+        await interaction.response.edit_message(embed=embed, view=SetupStep1View(self.guild, self.source_channel))
 
 
-# ============================
-# === COMMANDES DE SAUVEGARDE ===
-# ============================
+class SetupStep1View(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
 
-@bot.tree.command(name="save", description="Sauvegarde la configuration actuelle")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def save_cmd(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-
-    # Créer le salon de sauvegarde si nécessaire
-    backup_channel = await create_backup_channel(guild)
-
-    # Sauvegarder la configuration
-    try:
-        await save_guild_config(guild, config.CONFIG)
-        await interaction.followup.send(f"✅ Configuration sauvegardée dans {backup_channel.mention}.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Erreur lors de la sauvegarde: {e}", ephemeral=True)
+    @discord.ui.button(label="👑 Sélectionner Rôle Admin", style=discord.ButtonStyle.primary)
+    async def select_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🎓 Setup Seiko - Rôle Admin", description="Choisissez le rôle admin dans la liste", color=0x3498db)
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "admin", next_view_factory=lambda g: SetupStep2View(g, self.source_channel), back_view_factory=lambda g: SetupStep1View(g, self.source_channel)))
 
 
-@bot.tree.command(name="load-save", description="Charge une sauvegarde depuis un salon de sauvegarde")
-@discord.app_commands.describe(salon="Salon contenant la sauvegarde (choix via autocomplete)")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
-    """Recherche dans le salon donné une sauvegarde (fichier .json ou JSON dans le message) et la charge.
-    NB: n'applique pas de création de rôles/salons — la configuration est simplement chargée en mémoire et sauvegardée."""
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
+class SetupStep2View(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
 
-    loaded_config = None
-    source_msg = None
+    @discord.ui.button(label="🛡️ Sélectionner Rôle Modérateur", style=discord.ButtonStyle.primary)
+    async def select_mod(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🎓 Setup Seiko - Rôle Modérateur", description="Choisissez le rôle modérateur dans la liste", color=0x3498db)
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "moderator", next_view_factory=lambda g: SetupStep3View(g, self.source_channel), back_view_factory=lambda g: SetupStep2View(g, self.source_channel)))
 
-    try:
-        async for msg in salon.history(limit=300):
-            # pièces jointes JSON
-            for att in msg.attachments:
-                name = (att.filename or "").lower()
-                if name.endswith(".json"):
-                    try:
-                        raw = await att.read()
-                        import json
-                        loaded_config = json.loads(raw.decode("utf-8", errors="ignore"))
-                        source_msg = msg
-                        break
-                    except Exception:
-                        continue
-            if loaded_config:
-                break
 
-            # JSON brute dans le message
-            if msg.content and ("{" in msg.content and "}" in msg.content):
-                try:
-                    import json, re
-                    m = re.search(r"(\{.*\})", msg.content, re.S)
-                    if m:
-                        candidate = m.group(1)
-                        loaded_config = json.loads(candidate)
-                        source_msg = msg
-                        break
-                except Exception:
-                    pass
+class SetupStep3View(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
 
-        if not loaded_config:
-            await interaction.followup.send(f"❌ Aucune sauvegarde JSON trouvée dans {salon.mention}.", ephemeral=True)
-            return
+    @discord.ui.button(label="🎯 Sélectionner Rôle Fondateur", style=discord.ButtonStyle.primary)
+    async def select_founder(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🎓 Setup Seiko - Rôle Fondateur", description="Choisissez le rôle fondateur dans la liste", color=0x3498db)
+        await interaction.response.edit_message(embed=embed, view=RoleSelectView(self.guild, "founder", next_view_factory=lambda g: SetupStep4View(g, self.source_channel), back_view_factory=lambda g: SetupStep3View(g, self.source_channel)))
 
-        # Ne PAS appeler apply_guild_config ici (pour éviter création de salons/roles).
-        # On met à jour la configuration en mémoire et on la sauvegarde.
-        config.CONFIG.update(loaded_config)
 
+class SetupStep4View(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
+
+    @discord.ui.button(label="💬 Sélectionner Salon Bienvenue", style=discord.ButtonStyle.success)
+    async def select_welcome(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🎓 Setup Seiko - Salon Bienvenue", description="Choisissez le salon bienvenue dans la liste", color=0x3498db)
+        await interaction.response.edit_message(embed=embed, view=ChannelSelectView(self.guild, "welcome", next_view_factory=lambda g: SetupStep5View(g, self.source_channel), back_view_factory=lambda g: SetupStep4View(g, self.source_channel)))
+
+
+class SetupStep5View(discord.ui.View):
+    def __init__(self, guild: discord.Guild, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
+
+    @discord.ui.button(label="👋 Sélectionner Salon Adieu", style=discord.ButtonStyle.danger)
+    async def select_leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🎓 Setup Seiko - Salon Adieu", description="Choisissez le salon adieu dans la liste", color=0x3498db)
+        await interaction.response.edit_message(embed=embed, view=ChannelSelectView(self.guild, "leave", next_view_factory=lambda g: SetupFinishView(g, self.source_channel), back_view_factory=lambda g: SetupStep5View(g, self.source_channel)))
+
+
+class SetupFinishView(discord.ui.View):
+    def __init__(self, guild: discord.Guild = None, source_channel: discord.TextChannel = None):
+        super().__init__(timeout=600)
+        self.guild = guild
+        self.source_channel = source_channel
+
+    @discord.ui.button(label="✅ Configurer Tickets", style=discord.ButtonStyle.success)
+    async def configure_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🎟️ Configuration Tickets", description="Choisissez le mode de fonctionnement", color=0x5865F2)
+        await interaction.response.edit_message(embed=embed, view=TicketConfigView(source_channel=self.source_channel))
+
+    @discord.ui.button(label="⏭️ Passer", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Créer le salon Sauvegarde et sauvegarder la config si possible
         try:
-            await save_guild_config(guild, config.CONFIG)
+            backup_channel = await create_backup_channel(self.guild)
+            if backup_channel:
+                await save_guild_config(self.guild, config.CONFIG)
         except Exception:
             pass
 
-        keys = ", ".join(sorted(list(loaded_config.keys()))) if isinstance(loaded_config, dict) else "données non structurées"
-        summary = (
-            f"✅ Sauvegarde chargée depuis {salon.mention}.\n"
-            f"🔎 Message source : <@{source_msg.author.id}> (ID: {source_msg.id})\n"
-            f"🗂️ Clés détectées : {keys}\n"
-            f"💾 Configuration mise à jour en mémoire et sauvegardée (sans créer de salons/roles)."
+        await interaction.response.send_message(
+            "✅ **Setup Terminé!**\n\n"
+            "🔒 Votre configuration a été sauvegardée dans le salon de sauvegarde (si présent).\n"
+            "Vous pouvez configurer les tickets plus tard avec `/ticket-config`",
+            ephemeral=True
         )
-        await interaction.followup.send(summary, ephemeral=True)
-
+        # Envoyer guide si possible
         try:
-            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde chargée pour `{guild.name}` depuis {salon.mention} (sans appliquer les ressources)", color=0x2ecc71, timestamp=datetime.utcnow())
-            await send_log_to(bot, "commands", embed)
+            file_path = Path('POUR_TOI.txt')
+            if self.source_channel and file_path.exists():
+                await self.source_channel.send(file=discord.File(str(file_path), filename='POUR_TOI.txt'))
+            elif self.source_channel:
+                await self.source_channel.send("📖 Guide introuvable sur le serveur.")
         except Exception:
             pass
 
-    except Exception as e:
-        await interaction.followup.send(f"❌ Erreur durant la lecture du salon : {e}", ephemeral=True)
-
-
-# ============================
-# === COMMANDES D'ASSISTANCE ===
-# ============================
-
-# --- SUPPRIMÉ : commande /aide (remplacée) ---
-# La commande /aide a été supprimée à la demande.
-
-# --- SUPPRIMÉ : commande /help (remplacée) ---
-# La commande /help a été supprimée à la demande.
-
-# ============================
-# === COMMANDES DE TEST ===
-# ============================
-
-# --- SUPPRIMÉ : test-embed, test-button, test-select ---
-# Les commandes de test ont été retirées (test-embed, test-button, test-select).
-
-# ============================
-# === COMMANDES GÉNÉRALES (suite) ===
-# ============================
-
-@bot.tree.command(name="about", description="Informations sur le bot")
-async def about(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🤖 À propos de Seiko Security",
-        description="Seiko Security est un bot Discord avancé pour la modération, la sécurité et la gestion des tickets.",
-        color=0x5865F2
-    )
-    embed.add_field(name="Créateur", value="VotreNom#1234", inline=True)
-    embed.add_field(name="Serveur de support", value="Lien vers votre serveur", inline=True)
-    embed.add_field(name="Version", value="1.0.0", inline=True)
-    embed.set_footer(text="Merci d'utiliser Seiko Security!")
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-# --- SUPPRIMÉ : commande /invite ---
-# La commande /invite a été supprimée à la demande.
-
-# === AJOUT : commande /start (ouvre l'interface de configuration) ===
+# === AJOUT : commande /start (tunnel du tutoriel de setup) ===
 @bot.tree.command(name="start", description="Tutoriel de configuration du serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def start_setup(interaction: discord.Interaction):
-    """Démarre le tutoriel / setup. Ouvre l'interface de configuration (TicketConfigView)."""
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
+    await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
-        title="🎓 Setup Seiko",
-        description="Bienvenue ! Lancez la configuration du serveur. Utilisez les boutons et modales pour définir les options.",
-        color=0x3498db,
-        timestamp=discord.utils.utcnow()
+        title="🎓 Setup Seiko - Étape 0/6",
+        description="**Rôle de base à l'arrivée**\n\nQuel rôle donner automatiquement à l'arrivée d'un nouveau membre ?",
+        color=0x3498db
     )
+    await interaction.followup.send(embed=embed, view=SetupStep0View(interaction.guild, interaction.channel), ephemeral=True)
 
-    # TicketConfigView accepte source_channel pour envoyer le guide si nécessaire
-    try:
-        await interaction.followup.send(embed=embed, view=TicketConfigView(source_channel=interaction.channel), ephemeral=True)
-    except Exception:
-        # fallback simple
-        await interaction.followup.send("✅ Interface de configuration ouverte.", ephemeral=True)
-
-bot.run(config.DISCORD_TOKEN)
+# ...existing code...
