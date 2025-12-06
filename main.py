@@ -416,6 +416,9 @@ async def ticket_panel(interaction: discord.Interaction):
 	await interaction.channel.send(embed=embed, view=TicketPanelView(interaction.guild))
 	await interaction.response.send_message("✅ Panneau de tickets envoyé.", ephemeral=True)
 
+# --- Suppression de l'ancienne commande /ticket-panel qui causait un enregistrement en double ---
+# ancienne définition supprimée — utilisez la nouvelle implémentation de /ticket-panel plus bas (TicketPanelView)
+
 # === EVENT: on_ready ===
 @bot.event
 async def on_ready():
