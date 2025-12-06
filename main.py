@@ -436,6 +436,10 @@ if not existing:
 else:
     print("ℹ️ /ticket-panel déjà enregistrée — enregistrement dynamique ignoré")
 
+# --- SUPPRIMÉ : definition décorée de /ticket-panel (dupliquée) ---
+# La commande /ticket-panel est désormais enregistrée de façon programmatique
+# plus haut dans le fichier pour éviter CommandAlreadyRegistered
+
 # === EVENT: on_ready ===
 @bot.event
 async def on_ready():
@@ -1016,20 +1020,6 @@ class TicketConfigView(discord.ui.View):
                     await self.source_channel.send(file=discord.File(str(file_path), filename='POUR_TOI.txt'))
             except Exception as e:
                 print(f"[TicketConfig] Erreur envoi POUR_TOI.txt: {e}")
-
-
-@bot.tree.command(name="ticket-panel", description="Envoie le panneau de création de ticket")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def ticket_panel(interaction: discord.Interaction):
-	embed = discord.Embed(
-		title="🎟️ Support - Créer un ticket",
-		description="Sélectionnez le type puis cliquez sur 'Créer le Ticket'.\n> ⚠️ Abuse = Sanction",
-		color=0x2f3136,
-		timestamp=discord.utils.utcnow()
-	)
-	embed.set_footer(text="Seiko Security • Système sécurisé")
-	await interaction.channel.send(embed=embed, view=TicketPanelView(interaction.guild))
-	await interaction.response.send_message("✅ Panneau de tickets envoyé.", ephemeral=True)
 
 
 # EVENTS : détecter changement de pseudo / nickname
