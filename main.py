@@ -701,7 +701,7 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="start", description="Configurer complètement le bot pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def start_config(interaction: discord.Interaction):
-    await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
+    await interaction.response.defer(ephemeral=False)  # <-- C'est CRUCIAL
     guild = interaction.guild
 
     # --- Salons ---
@@ -810,11 +810,26 @@ async def start_config(interaction: discord.Interaction):
     await save_ch.send("💾 **Sauvegarde post-`/start`**", file=discord.File(io.BytesIO(data.encode()), filename="config.json"))
 
     # --- MESSAGE FINAL ---
-    await interaction.channel.send(
+    final_msg = (
         "✅ **Configuration terminée !**\n"
         "🔧 Vous pouvez modifier les paramètres à tout moment avec `/configs`.\n"
         "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
+    await interaction.followup.send(final_msg)
+
+    # --- Envoi ASYNCHRONE du guide POUR_TOI.txt ---
+    async def send_guide():
+        try:
+            file_path = Path("POUR_TOI.txt")
+            if file_path.exists():
+                await interaction.channel.send(
+                    "📚 Voici votre guide de configuration :", 
+                    file=discord.File(file_path, filename="POUR_TOI.txt")
+                )
+        except Exception as e:
+            print(f"[START] Erreur envoi POUR_TOI.txt: {e}")
+
+    asyncio.create_task(send_guide())  # ⚡ Ne bloque pas le flow principal
 
 
 # === VIEWS POUR /start ===
