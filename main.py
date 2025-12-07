@@ -635,7 +635,7 @@ async def on_ready():
             
             # AJOUTER LES VIEWS PERSISTANTES
             try:
-                bot.add_view(TicketView())  # celui qui a le bouton "Créer un ticket" avec custom_id
+                bot.add_view(TicketView())
                 bot.add_view(TicketPanelMultiView({}))
                 print("✅ Views ticket enregistrées")
             except Exception as e:
