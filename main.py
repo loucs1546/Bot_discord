@@ -701,7 +701,7 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="start", description="Configurer complètement le bot pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def start_config(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=False)  # <-- C'est CRUCIAL
+    await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
     guild = interaction.guild
 
     # --- Salons ---
@@ -800,36 +800,28 @@ async def start_config(interaction: discord.Interaction):
     await interaction.channel.send("Activez/désactivez les protections :", view=sec_view)
     await sec_view.wait()
 
-    # --- SAUVEGARDE ---
+        # --- SAUVEGARDE & MESSAGE FINAL ---
     save_ch = discord.utils.get(guild.text_channels, name="📁-sauvegarde")
     if not save_ch:
         overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
         save_ch = await guild.create_text_channel("📁-sauvegarde", overwrites=overwrites)
-    import json, io
-    data = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
-    await save_ch.send("💾 **Sauvegarde post-`/start`**", file=discord.File(io.BytesIO(data.encode()), filename="config.json"))
 
-    # --- MESSAGE FINAL ---
-    final_msg = (
-        "✅ **Configuration terminée !**\n"
-        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/configs`.\n"
+    # Message "patienter"
+    wait_msg = await interaction.channel.send("⏳ **Veuillez patienter...** Sauvegarde en cours.")
+
+    # Créer le fichier POUR_TOI.txt
+    import json, io
+    data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+    file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
+    await save_ch.send("💾 **Sauvegarde post-`/start`**", file=file)
+
+    # Supprimer message en attente et envoyer confirmation
+    await wait_msg.delete()
+    await interaction.channel.send(
+        "✅ **Configuration terminée !**"
+        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/config`."
         "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
-    await interaction.followup.send(final_msg)
-
-    # --- Envoi ASYNCHRONE du guide POUR_TOI.txt ---
-    async def send_guide():
-        try:
-            file_path = Path("POUR_TOI.txt")
-            if file_path.exists():
-                await interaction.channel.send(
-                    "📚 Voici votre guide de configuration :", 
-                    file=discord.File(file_path, filename="POUR_TOI.txt")
-                )
-        except Exception as e:
-            print(f"[START] Erreur envoi POUR_TOI.txt: {e}")
-
-    asyncio.create_task(send_guide())  # ⚡ Ne bloque pas le flow principal
 
 
 # === VIEWS POUR /start ===
@@ -922,13 +914,13 @@ async def reset_config(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@bot.tree.command(name="configs", description="Modifier la configuration actuelle")
+@bot.tree.command(name="config", description="Modifier la configuration actuelle")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def configs(interaction: discord.Interaction):
     class ConfigMainView(discord.ui.View):
         @discord.ui.button(label="👥 Rôles & Salons", style=discord.ButtonStyle.primary, emoji="👥")
         async def roles_btn(self, i, _):
-            await i.response.send_message("...", view=ConfigRolesView(), ephemeral=True)
+            await i.response.send_message("...", view=ConfigRolesView(i), ephemeral=True)
         @discord.ui.button(label="📜 Logs", style=discord.ButtonStyle.secondary, emoji="📜")
         async def logs_btn(self, i, _):
             await i.response.send_message("...", view=ConfigLogsView(), ephemeral=True)
@@ -938,10 +930,56 @@ async def configs(interaction: discord.Interaction):
     await interaction.response.send_message("🔧 **Modifier la configuration**", view=ConfigMainView(), ephemeral=True)
 
 class ConfigRolesView(discord.ui.View):
-    @discord.ui.button(label="🔄 Réinitialiser rôles", style=discord.ButtonStyle.danger)
-    async def reset(self, i, _):
-        config.CONFIG["roles"] = {}
-        await i.response.send_message("✅ Rôles réinitialisés. Utilisez `/start` pour les reconfigurer.", ephemeral=True)
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__(timeout=300)
+        self.interaction = interaction
+
+    async def update_config_and_save(self, interaction: discord.Interaction, key: str, value_id: int, is_role: bool = True):
+        config.CONFIG.setdefault("roles" if is_role else "channels", {})[key] = value_id
+        # Sauvegarde
+        save_ch = discord.utils.get(interaction.guild.text_channels, name="📁-sauvegarde")
+        if save_ch:
+            import json, io
+            data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+            file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
+            await save_ch.send("💾 **Sauvegarde mise à jour**", file=file)
+        await interaction.followup.send("✅ Modification enregistrée.", ephemeral=True)
+
+    @discord.ui.button(label="Salon d'accueil", style=discord.ButtonStyle.secondary)
+    async def welcome_btn(self, i: discord.Interaction, _):
+        ch = await wait_for_channel_mention(i, i.guild, "salon d'accueil")
+        if ch:
+            await self.update_config_and_save(i, "welcome", ch.id, is_role=False)
+
+    @discord.ui.button(label="Salon départ", style=discord.ButtonStyle.secondary)
+    async def leave_btn(self, i: discord.Interaction, _):
+        ch = await wait_for_channel_mention(i, i.guild, "salon de départ")
+        if ch:
+            await self.update_config_and_save(i, "leave", ch.id, is_role=False)
+
+    @discord.ui.button(label="Rôle par défaut", style=discord.ButtonStyle.primary)
+    async def default_role_btn(self, i: discord.Interaction, _):
+        role = await wait_for_role_mention(i, i.guild, "rôle par défaut")
+        if role:
+            await self.update_config_and_save(i, "default", role.id, is_role=True)
+
+    @discord.ui.button(label="Rôle support", style=discord.ButtonStyle.primary)
+    async def support_role_btn(self, i: discord.Interaction, _):
+        role = await wait_for_role_mention(i, i.guild, "rôle support")
+        if role:
+            await self.update_config_and_save(i, "support", role.id, is_role=True)
+
+    @discord.ui.button(label="Rôle admin", style=discord.ButtonStyle.danger)
+    async def admin_role_btn(self, i: discord.Interaction, _):
+        role = await wait_for_role_mention(i, i.guild, "rôle administrateur")
+        if role:
+            await self.update_config_and_save(i, "admin", role.id, is_role=True)
+
+    @discord.ui.button(label="Rôle fondateur", style=discord.ButtonStyle.danger)
+    async def founder_role_btn(self, i: discord.Interaction, _):
+        role = await wait_for_role_mention(i, i.guild, "rôle fondateur")
+        if role:
+            await self.update_config_and_save(i, "founder", role.id, is_role=True)
 
 class ConfigLogsView(discord.ui.View):
     @discord.ui.button(label="🔄 Recréer logs", style=discord.ButtonStyle.danger)

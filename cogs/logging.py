@@ -154,7 +154,7 @@ class LoggingCog(commands.Cog):
                 if added:
                     desc += "➕ Ajoutés : " + ", ".join(r.mention for r in added) + "\n"
                 if removed:
-                    desc += "➖ Retirés : " + ", ".join(r.mention for r in removed)
+                    desc += "➖ Retirés : " + ", ".join(r.mention for r in removed) + "\n"
 
                 embed = discord.Embed(
                     title="👑 Rôles modifiés",
