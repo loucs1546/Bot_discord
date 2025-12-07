@@ -704,63 +704,156 @@ async def start_config(interaction: discord.Interaction):
     await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
     guild = interaction.guild
 
-    welcome = await wait_for_channel_mention(interaction, guild, "salon d’accueil")
-    if not welcome: return
-    config.CONFIG.setdefault("channels", {})["welcome"] = welcome.id
+    # --- Salons ---
+    await interaction.channel.send("📌 **Étape 1/5** : Veuillez mentionner le **salon d'accueil** (arrivée des membres).")
+    welcome_channel = await wait_for_channel_mention(interaction, guild)
+    if not welcome_channel: return
+    config.CONFIG.setdefault("channels", {})["welcome"] = welcome_channel.id
 
-    leave = await wait_for_channel_mention(interaction, guild, "salon de départ")
-    if not leave: return
-    config.CONFIG["channels"]["leave"] = leave.id
+    await interaction.channel.send("📌 **Étape 2/5** : Veuillez mentionner le **salon de départ** (départ des membres).")
+    leave_channel = await wait_for_channel_mention(interaction, guild)
+    if not leave_channel: return
+    config.CONFIG["channels"]["leave"] = leave_channel.id
 
-    default_role = await wait_for_role_mention(interaction, guild, "rôle par défaut")
+    # --- Rôles ---
+    await interaction.channel.send("📌 **Étape 3/5** : Mentionnez le **rôle par défaut** pour les nouveaux membres.")
+    default_role = await wait_for_role_mention(interaction, guild)
     if not default_role: return
     config.CONFIG.setdefault("roles", {})["default"] = default_role.id
 
-    support_role = await wait_for_role_mention(interaction, guild, "rôle support")
+    await interaction.channel.send("📌 **Étape 4/5** : Mentionnez le **rôle support** (pour gérer les tickets).")
+    support_role = await wait_for_role_mention(interaction, guild)
     if not support_role: return
     config.CONFIG["roles"]["support"] = support_role.id
 
-    founder_role = await wait_for_role_mention(interaction, guild, "rôle fondateur")
-    if not founder_role: return
-    config.CONFIG["roles"]["founder"] = founder_role.id
-
-    admin_role = await wait_for_role_mention(interaction, guild, "rôle administrateur")
+    await interaction.channel.send("📌 **Étape 5/5** : Mentionnez les rôles **administrateur** et **fondateur**.")
+    admin_role = await wait_for_role_mention(interaction, guild, "administrateur")
     if not admin_role: return
     config.CONFIG["roles"]["admin"] = admin_role.id
 
-    # Tickets
-    await interaction.channel.send("🎟️ **Configuration des tickets**")
-    view = TicketModeChoiceView()
-    msg = await interaction.channel.send("Basique ou avancé ?", view=view)
-    await view.wait()
-    if not hasattr(view, "chosen_mode"): return
-    mode = view.chosen_mode
-    options = await collect_ticket_options(interaction, guild) if mode == "advanced" else ["Support Général"]
-    config.CONFIG.setdefault("ticket_systems", {})["default"] = {"mode": mode, "options": options}
+    founder_role = await wait_for_role_mention(interaction, guild, "fondateur")
+    if not founder_role: return
+    config.CONFIG["roles"]["founder"] = founder_role.id
 
-    # Logs
-    missing = await check_required_logs(guild)
-    if missing:
-        await interaction.channel.send(f"⚠️ Salons manquants : {', '.join(missing)}\n➡️ Utilisez `/add-cat-log`.")
+    # --- DÉTECTION DES LOGS ---
+    log_cat = None
+    for cat in guild.categories:
+        if "surveillances" in cat.name.lower() or "log" in cat.name.lower():
+            log_cat = cat
+            break
 
-    # Sécurité
-    await interaction.channel.send("🛡️ **Sécurité**")
-    sec_view = SecurityConfigView()
-    sec_msg = await interaction.channel.send("Activez les protections :", view=sec_view)
+    if log_cat:
+        await interaction.channel.send("✅ **Catégorie de logs détectée** : les salons existants seront utilisés.")
+        # Mapper les salons existants
+        mapping = {
+            "messages": "messages",
+            "vocal": "vocal",
+            "ticket": "tickets",
+            "moderation": "rôles",
+            "securite": "alertes",
+            "sanctions": "sanctions",
+            "commands": "commandes",
+            "profile": "profil",
+            "content": "contenu",
+            "alerts": "alertes",
+            "giveaway": "giveaway",
+            "bavures": "bavures"
+        }
+        found = {}
+        for channel in log_cat.text_channels:
+            for key, keyword in mapping.items():
+                if keyword in channel.name.lower():
+                    found[key] = channel.id
+        config.CONFIG.setdefault("logs", {}).update(found)
+    else:
+        await interaction.channel.send("❓ **Aucune catégorie de logs trouvée.**\nSouhaitez-vous en créer une ?")
+        log_view = LogCreationChoiceView()
+        await interaction.channel.send(view=log_view)
+        await log_view.wait()
+        if log_view.create_logs:
+            # Créer la catégorie + salons
+            overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
+            category = await guild.create_category(name="𓆩𖤍𓆪۰⟣ SURVEILLANCES ⟢۰𓆩𖤍𓆪", overwrites=overwrites)
+            salon_configs = [
+                ("📜・messages", "messages"),
+                ("🎤・vocal", "vocal"),
+                ("🎫・tickets", "ticket"),
+                ("👑・rôles", "moderation"),
+                ("🚨・alertes", "securite"),
+                ("⚖️・sanctions", "sanctions"),
+                ("🛠️・commandes", "commands"),
+                ("📛・profil", "profile"),
+                ("🔍・contenu", "content"),
+                ("💥・bavures", "bavures"),
+                ("🎉・giveaway", "giveaway")
+            ]
+            channel_ids = {}
+            for name, key in salon_configs:
+                ch = await guild.create_text_channel(name=name, category=category, overwrites=overwrites)
+                channel_ids[key] = ch.id
+            config.CONFIG.setdefault("logs", {}).update(channel_ids)
+            await interaction.channel.send("✅ **Catégorie de logs créée avec succès !**")
+
+    # --- SÉCURITÉ ---
+    await interaction.channel.send("🛡️ **Configurer la sécurité**")
+    sec_view = FinalSecurityConfigView()
+    await interaction.channel.send("Activez/désactivez les protections :", view=sec_view)
     await sec_view.wait()
 
-    # Sauvegarde
+    # --- SAUVEGARDE ---
     save_ch = discord.utils.get(guild.text_channels, name="📁-sauvegarde")
     if not save_ch:
         overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
         save_ch = await guild.create_text_channel("📁-sauvegarde", overwrites=overwrites)
+    import json, io
     data = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
     await save_ch.send("💾 **Sauvegarde post-`/start`**", file=discord.File(io.BytesIO(data.encode()), filename="config.json"))
 
+    # --- MESSAGE FINAL ---
     await interaction.channel.send(
         "✅ **Configuration terminée !**\n"
-        "📄 Utilisez `/configs` pour modifier la configuration à tout moment."
+        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/configs`.\n"
+        "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
+
+
+# === VIEWS POUR /start ===
+class LogCreationChoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.create_logs = None
+    @discord.ui.button(label="✅ Oui, créer les logs", style=discord.ButtonStyle.success)
+    async def yes(self, i, _):
+        self.create_logs = True
+        await i.response.send_message("✅ Création des logs activée.", ephemeral=True)
+        self.stop()
+    @discord.ui.button(label="❌ Non, ignorer", style=discord.ButtonStyle.danger)
+    async def no(self, i, _):
+        self.create_logs = False
+        await i.response.send_message("❌ Aucun log ne sera créé.", ephemeral=True)
+        self.stop()
+
+class FinalSecurityConfigView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        self.anti_spam = config.CONFIG.get("security", {}).get("anti_spam", True)
+        self.anti_raid = config.CONFIG.get("security", {}).get("anti_raid", True)
+        self.anti_hack = config.CONFIG.get("security", {}).get("anti_hack", True)
+        self.update_buttons()
+    def update_buttons(self):
+        self.clear_items()
+        self.add_item(self._make_button("Anti-Spam", self.anti_spam, self.toggle_spam))
+        self.add_item(self._make_button("Anti-Raid", self.anti_raid, self.toggle_raid))
+        self.add_item(self._make_button("Anti-Hack", self.anti_hack, self.toggle_hack))
+        self.add_item(discord.ui.Button(label="✅ Valider", style=discord.ButtonStyle.green, custom_id="finish_sec"))
+    def _make_button(self, label, enabled, callback):
+        btn = discord.ui.Button(label=label, style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary)
+        btn.callback = callback
+        return btn
+    async def toggle_spam(self, i): self.anti_spam = not self.anti_spam; config.CONFIG.setdefault("security", {})["anti_spam"] = self.anti_spam; self.update_buttons(); await i.response.edit_message(view=self)
+    async def toggle_raid(self, i): self.anti_raid = not self.anti_raid; config.CONFIG.setdefault("security", {})["anti_raid"] = self.anti_raid; self.update_buttons(); await i.response.edit_message(view=self)
+    async def toggle_hack(self, i): self.anti_hack = not self.anti_hack; config.CONFIG.setdefault("security", {})["anti_hack"] = self.anti_hack; self.update_buttons(); await i.response.edit_message(view=self)
+
 
 @bot.tree.command(name="reset", description="Réinitialise TOUTES les données du bot pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
