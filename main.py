@@ -303,21 +303,15 @@ class TicketChoiceSelect(discord.ui.Select):
         pass
 
 class TicketChoiceView(discord.ui.View):
-    """Interface pour choisir le type de ticket avant création"""
     def __init__(self, guild: discord.Guild, ticket_system: str):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)  # ← crucial
         self.guild = guild
         self.ticket_system = ticket_system
         self.selected_option = None
-        
-        # Ajouter le Select menu
         select = TicketChoiceSelect(guild, ticket_system)
-        
-        # Override le callback pour stocker la sélection
         async def select_callback(interaction: discord.Interaction):
             self.selected_option = select.values[0]
             await interaction.response.defer()
-        
         select.callback = select_callback
         self.add_item(select)
     
@@ -641,8 +635,8 @@ async def on_ready():
             
             # AJOUTER LES VIEWS PERSISTANTES
             try:
-                bot.add_view(TicketView())
-                bot.add_view(TicketControls(0))
+                bot.add_view(TicketChoiceView(None, "default"))
+                bot.add_view(TicketPanelMultiView({}))
                 print("✅ Views ticket enregistrées")
             except Exception as e:
                 print(f"❌ Erreur enregistrement views persistantes: {e}")
