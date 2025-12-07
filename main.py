@@ -635,7 +635,7 @@ async def on_ready():
             
             # AJOUTER LES VIEWS PERSISTANTES
             try:
-                bot.add_view(TicketChoiceView(None, "default"))
+                bot.add_view(TicketView())  # celui qui a le bouton "Créer un ticket" avec custom_id
                 bot.add_view(TicketPanelMultiView({}))
                 print("✅ Views ticket enregistrées")
             except Exception as e:
@@ -832,6 +832,44 @@ class LogCreationChoiceView(discord.ui.View):
         self.create_logs = False
         await i.response.send_message("❌ Aucun log ne sera créé.", ephemeral=True)
         self.stop()
+
+class PersistentTicketPanelView(discord.ui.View):
+    def __init__(self, system_name: str):
+        super().__init__(timeout=None)
+        self.system_name = system_name
+        # Select avec custom_id fixe
+        select = discord.ui.Select(
+            custom_id=f"ticket_select_{system_name}",
+            placeholder="Choisissez le type de ticket...",
+            options=[
+                discord.SelectOption(label=opt, value=opt)
+                for opt in config.CONFIG.get("ticket_systems", {}).get(system_name, {}).get("options", ["Support Général"])[:25]
+            ]
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+
+        button = discord.ui.Button(
+            label="📩 Créer le Ticket",
+            style=discord.ButtonStyle.success,
+            emoji="🎫",
+            custom_id=f"ticket_create_{system_name}"
+        )
+        button.callback = self.create_ticket
+        self.add_item(button)
+
+        self.selected_option = None
+
+    async def select_callback(self, interaction: discord.Interaction):
+        self.selected_option = interaction.data["values"][0]
+        await interaction.response.defer()
+
+    async def create_ticket(self, interaction: discord.Interaction):
+        if not self.selected_option:
+            await interaction.response.send_message("❌ Sélectionnez d’abord un type de ticket.", ephemeral=True)
+            return
+        # ... logique de création de ticket (copie de TicketChoiceView.create_button)
+        # (tu peux extraire cette logique dans une fonction séparée)
 
 class FinalSecurityConfigView(discord.ui.View):
     def __init__(self):
