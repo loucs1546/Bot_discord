@@ -1520,38 +1520,26 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
 
     mode = sys_conf.get("mode", "basic")
     if mode == "basic":
-        # Envoie DIRECTEMENT un bouton "Créer un ticket"
-        view = TicketView(ticket_system=sys_name)
+        # Mode basique : bouton direct, pas de select
         embed = discord.Embed(
             title="🎟️ Support",
             description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket.",
             color=0x5865F2,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.utcnow()
         )
         embed.set_footer(text="Seiko Security")
+        view = TicketView(ticket_system=sys_name)
         await interaction.channel.send(embed=embed, view=view)
     else:
-        # Mode avancé → select
+        # Mode avancé : select + bouton (via TicketChoiceView)
         embed = discord.Embed(
             title="🎟️ Support",
             description="Sélectionnez le type de ticket.",
             color=0x5865F2,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.utcnow()
         )
         view = TicketChoiceView(interaction.guild, sys_name)
-        await interaction.channel.send(embed=embed, view=view)    systems = config.CONFIG.get("ticket_systems", {})
-    sys_conf = systems.get(sys_name)
-    if not sys_conf:
-        return
-    embed = discord.Embed(
-        title="🎟️ Support - Créer un ticket",
-        description="Sélectionnez le type de demande, puis cliquez sur **Créer le Ticket**.",
-        color=0x5865F2,
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_footer(text="Seiko Security • Système de tickets")
-    view = TicketChoiceView(interaction.guild, sys_name)
-    await interaction.channel.send(embed=embed, view=view)
+        await interaction.channel.send(embed=embed, view=view)
 
 class TicketPanelMultiView(discord.ui.View):
     def __init__(self, systems: dict):
