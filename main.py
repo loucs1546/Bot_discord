@@ -281,35 +281,6 @@ class LogChannelSelectView(discord.ui.View):
         ][:25]
         self.add_item(select)
 
-class TicketChoiceSelect(discord.ui.Select):
-    def __init__(self, guild: discord.Guild, ticket_system: str):
-        systems = config.CONFIG.get("ticket_systems", {})
-        sys_conf = systems.get(ticket_system, {})
-        options_list = sys_conf.get("options", ["Support Général"])
-        # ✅ Utiliser des valeurs uniques pour éviter l'erreur 50035
-        self.options_map = {}
-        select_options = []
-        for i, opt in enumerate(options_list[:25]):
-            value = f"ticket_opt_{i}"
-            self.options_map[value] = opt
-            label = opt[:100]
-            desc = opt[:50] if len(opt) > 50 else None
-            select_options.append(discord.SelectOption(label=label, value=value, description=desc))
-        super().__init__(
-            placeholder="Sélectionner le type de ticket...",
-            options=select_options,
-            min_values=1,
-            max_values=1
-        )
-        self.guild = guild
-
-    async def callback(self, interaction: discord.Interaction):
-        selected_value = interaction.data["values"][0]
-        # Stocke le vrai texte dans la vue parente
-        interaction.message.components  # <-- on n'a pas accès à self.view, donc on le fait autrement
-        # ⚠️ On va gérer ça dans TicketChoiceView via une méthode alternative
-        await interaction.response.defer()
-
 @bot.tree.command(name="rule-config", description="Configurer le règlement du serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def rule_config(interaction: discord.Interaction):
@@ -439,31 +410,30 @@ async def rule(interaction: discord.Interaction):
     bot.add_view(view)  # pour persistance après reboot
     await interaction.followup.send(embed=embed, view=view)
 
-class TicketChoiceView(discord.ui.View):
-    def __init__(self, guild: discord.Guild, ticket_system: str):
-        super().__init__(timeout=None)
-        self.guild = guild
+class AdvancedTicketSelect(discord.ui.Select):
+    def __init__(self, ticket_system: str):
+        systems = config.CONFIG.get("ticket_systems", {})
+        sys_conf = systems.get(ticket_system, {})
+        options_list = sys_conf.get("options", ["Support Général"])
+        select_options = []
+        for i, opt in enumerate(options_list[:25]):
+            value = f"opt_{i}"
+            label = opt[:100]
+            desc = opt[:50] if len(opt) > 50 else None
+            select_options.append(discord.SelectOption(label=label, value=value, description=desc))
+        super().__init__(
+            placeholder="Sélectionnez le type de ticket...",
+            options=select_options,
+            min_values=1,
+            max_values=1
+        )
         self.ticket_system = ticket_system
-        self.selected_option = None
-        # Créer le select
-        select = TicketChoiceSelect(guild, ticket_system)
-        select.callback = self.on_select_callback
-        self.add_item(select)
+        self.options_list = options_list
 
-    async def on_select_callback(self, interaction: discord.Interaction):
-        selected_value = interaction.data["values"][0]
-        # Récupérer la vraie option via un mapping stocké dans le select
-        select = self.children[0]  # Le premier élément est le Select
-        self.selected_option = select.options_map[selected_value]
-        await interaction.response.defer()
-
-    @discord.ui.button(label="📩 Créer le Ticket", style=discord.ButtonStyle.success, emoji="🎫")
-    async def create_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.selected_option:
-            await interaction.response.send_message("❌ Sélectionnez d’abord un type de ticket.", ephemeral=True)
-            return
-
-        guild = self.guild or interaction.guild
+    async def callback(self, interaction: discord.Interaction):
+        selected_index = int(self.values[0].replace("opt_", ""))
+        selected_option = self.options_list[selected_index]
+        guild = interaction.guild
         user = interaction.user
 
         # Empêcher doublons
@@ -472,7 +442,6 @@ class TicketChoiceView(discord.ui.View):
                 await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=True)
                 return
 
-        # Récupérer config
         systems = config.CONFIG.get("ticket_systems", {})
         sys_conf = systems.get(self.ticket_system)
         if not sys_conf:
@@ -497,7 +466,7 @@ class TicketChoiceView(discord.ui.View):
 
         # Message dans le ticket
         embed = discord.Embed(
-            title=f"🎟️ {self.selected_option} - #{counter:06d}",
+            title=f"🎟️ {selected_option} - #{counter:06d}",
             description=f"""Bonjour {user.mention},
 📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
 > ⚠️ Pas de fichiers/liens.""",
@@ -512,7 +481,79 @@ class TicketChoiceView(discord.ui.View):
         log_embed = discord.Embed(
             title="🎟️ Ticket créé",
             description=f"""**Utilisateur** : {user.mention}
-**Type** : {self.selected_option}
+**Type** : {selected_option}
+**Ticket** : {ticket_channel.mention}""",
+            color=0x00ff00,
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=user.display_avatar.url)
+        await send_log_to(bot, "ticket", log_embed)
+
+        await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
+
+class AdvancedTicketView(discord.ui.View):
+    def __init__(self, ticket_system: str):
+        super().__init__(timeout=None)
+        self.add_item(AdvancedTicketSelect(ticket_system))
+
+class BasicTicketView(discord.ui.View):
+    def __init__(self, ticket_system: str):
+        super().__init__(timeout=None)
+        self.ticket_system = ticket_system
+
+    @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, emoji="🎫")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        user = interaction.user
+
+        # Empêcher doublons
+        for ch in guild.channels:
+            if ch.name.startswith("ticket-") and str(user.id) in ch.name:
+                await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=True)
+                return
+
+        systems = config.CONFIG.get("ticket_systems", {})
+        sys_conf = systems.get(self.ticket_system)
+        if not sys_conf:
+            await interaction.response.send_message("❌ Système introuvable.", ephemeral=True)
+            return
+
+        options = sys_conf.get("options", ["Support Général"])
+        selected_option = options[0]  # Toujours le premier en mode basique
+        counter = sys_conf.get("counter", 0) + 1
+        config.CONFIG["ticket_systems"][self.ticket_system]["counter"] = counter
+        ticket_name = f"ticket-{str(counter).zfill(6)}"
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=False),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+        }
+
+        try:
+            ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+            return
+
+        # Message dans le ticket
+        embed = discord.Embed(
+            title=f"🎟️ {selected_option} - #{counter:06d}",
+            description=f"""Bonjour {user.mention},
+📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
+> ⚠️ Pas de fichiers/liens.""",
+            color=0x5865F2,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="Seiko Security")
+        view = TicketManagementView(user.id, counter)
+        await ticket_channel.send(embed=embed, view=view)
+
+        # Logs
+        log_embed = discord.Embed(
+            title="🎟️ Ticket créé",
+            description=f"""**Utilisateur** : {user.mention}
+**Type** : {selected_option}
 **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
             timestamp=datetime.utcnow()
@@ -649,85 +690,6 @@ class TicketManagementView(discord.ui.View):
 
         await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=True)
 
-
-# TicketView REFACTORISÉE - Utilise TicketChoiceView
-class TicketView(discord.ui.View):
-    def __init__(self, ticket_system=None):
-        super().__init__(timeout=None)
-        self.ticket_system = ticket_system
-        @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id="create_ticket")
-        async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-            guild = interaction.guild
-            user = interaction.user
-            sys = self.ticket_system or "default"
-            systems = config.CONFIG.get("ticket_systems", {})
-            sys_conf = systems.get(sys)
-            if not sys_conf:
-                await interaction.response.send_message("❌ Système de ticket introuvable.", ephemeral=True)
-                return
-
-            mode = sys_conf.get("mode", "basic")
-            options = sys_conf.get("options", ["Support Général"])
-
-            # === MODE BASIQUE : création directe ===
-            if mode == "basic":
-                # Vérification ticket existant
-                for channel in guild.channels:
-                    if channel.name.startswith("ticket-") and str(user.id) in channel.name:
-                        await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert !", ephemeral=True)
-                        return
-
-                selected_option = options[0] if options else "Support Général"
-                counter = sys_conf.get("counter", 0) + 1
-                config.CONFIG["ticket_systems"][sys]["counter"] = counter
-                ticket_name = f"ticket-{str(counter).zfill(6)}"
-
-                overwrites = {
-                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                    user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=False, embed_links=False),
-                    guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
-                }
-                try:
-                    ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites, reason=f"Ticket par {user}")
-                except Exception as e:
-                    await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
-                    return
-
-                embed = discord.Embed(
-                    title=f"🎟️ {selected_option} - #{counter:06d}",
-                    description=(
-                        f"Bonjour {user.mention},\n"
-                        "📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n"
-                        "> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets."
-                    ),
-                    color=0x5865F2,
-                    timestamp=datetime.now(discord.utils.UTC)
-                )
-                embed.set_footer(text="Seiko Security • Ticket automatique")
-                view = TicketManagementView(user.id, counter)
-                await ticket_channel.send(embed=embed, view=view)
-
-                log_embed = discord.Embed(
-                    title="🎟️ Ticket créé",
-                    description=f"""**Utilisateur** : {user.mention}
-                **Type** : {selected_option}
-                **Ticket** : {ticket_channel.mention}""",
-                    color=0x00ff00,
-                    timestamp=datetime.now(discord.utils.UTC)
-                )
-                log_embed.set_thumbnail(url=user.display_avatar.url)
-                await send_log_to(bot, "ticket", log_embed)
-
-                await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
-                return
-
-            # === MODE AVANCÉ : affiche select + bouton ===
-            embed = discord.Embed(
-                title="🎟️ Créer un Ticket",
-                description="Sélectionnez le type de ticket et cliquez sur **Créer le Ticket**.",
-                color=0x5865F2
-            )
-            await interaction.response.send_message(embed=embed, view=TicketChoiceView(guild, sys), ephemeral=True)
 
 # TicketControls est maintenant un alias pour TicketManagementView (compatibilité)
 class TicketControls(TicketManagementView):
@@ -1565,27 +1527,21 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
         return
 
     mode = sys_conf.get("mode", "basic")
+    embed = discord.Embed(
+        title="🎟️ Support",
+        description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket." if mode == "basic"
+                    else "Sélectionnez le type de ticket ci-dessous.",
+        color=0x5865F2,
+        timestamp=datetime.utcnow()
+    )
+    embed.set_footer(text="Seiko Security")
+
     if mode == "basic":
-        # Mode basique : bouton direct, pas de select
-        embed = discord.Embed(
-            title="🎟️ Support",
-            description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket.",
-            color=0x5865F2,
-            timestamp=datetime.utcnow()
-        )
-        embed.set_footer(text="Seiko Security")
-        view = TicketView(ticket_system=sys_name)
-        await interaction.channel.send(embed=embed, view=view)
+        view = BasicTicketView(sys_name)
     else:
-        # Mode avancé : select + bouton (via TicketChoiceView)
-        embed = discord.Embed(
-            title="🎟️ Support",
-            description="Sélectionnez le type de ticket.",
-            color=0x5865F2,
-            timestamp=datetime.utcnow()
-        )
-        view = TicketChoiceView(interaction.guild, sys_name)
-        await interaction.channel.send(embed=embed, view=view)
+        view = AdvancedTicketView(sys_name)
+
+    await interaction.channel.send(embed=embed, view=view)
 
 class TicketPanelMultiView(discord.ui.View):
     def __init__(self, systems: dict):
