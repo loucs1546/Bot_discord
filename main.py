@@ -545,8 +545,11 @@ class TicketView(discord.ui.View):
 
                 embed = discord.Embed(
                     title=f"🎟️ {selected_option} - #{counter:06d}",
-                    description=f"Bonjour {user.mention},
-    📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.",
+                    description=(
+                        f"Bonjour {user.mention},\n"
+                        "📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n"
+                        "> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets."
+                    ),
                     color=0x5865F2,
                     timestamp=datetime.utcnow()
                 )
