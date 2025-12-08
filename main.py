@@ -377,7 +377,7 @@ async def rule(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📜 Règlement Discord",
         color=0x2f3136,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(datetime.timezone.utc)
     )
     embed.add_field(
         name="🔷 Règle Généraux",
@@ -450,7 +450,13 @@ class AdvancedTicketSelect(discord.ui.Select):
 
         counter = sys_conf.get("counter", 0) + 1
         config.CONFIG["ticket_systems"][self.ticket_system]["counter"] = counter
-        ticket_name = f"ticket-{str(counter).zfill(6)}"
+        # Nettoyer le pseudo (caractères invalides pour nom de salon)
+        clean_name = re.sub(r"[^a-zA-Z0-9\-_]", "", user.name.lower())
+        if not clean_name:
+            clean_name = f"user{user.id}"
+        # Limiter à 20 caractères pour éviter les noms trop longs
+        clean_name = clean_name[:20]
+        ticket_name = f"{clean_name}-{str(ticket_num).zfill(4)}"
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -471,7 +477,7 @@ class AdvancedTicketSelect(discord.ui.Select):
 📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
 > ⚠️ Pas de fichiers/liens.""",
             color=0x5865F2,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(datetime.timezone.utc)
         )
         embed.set_footer(text="Seiko Security")
         view = TicketManagementView(user.id, counter)
@@ -481,10 +487,13 @@ class AdvancedTicketSelect(discord.ui.Select):
         log_embed = discord.Embed(
             title="🎟️ Ticket créé",
             description=f"""**Utilisateur** : {user.mention}
-**Type** : {selected_option}
-**Ticket** : {ticket_channel.mention}""",
+**Type** : {selected_option}""",
+        await interaction.response.send_message(
+            f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
+            ephemeral=True
+        ),
             color=0x00ff00,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(datetime.timezone.utc)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
@@ -522,7 +531,13 @@ class BasicTicketView(discord.ui.View):
         selected_option = options[0]  # Toujours le premier en mode basique
         counter = sys_conf.get("counter", 0) + 1
         config.CONFIG["ticket_systems"][self.ticket_system]["counter"] = counter
-        ticket_name = f"ticket-{str(counter).zfill(6)}"
+        # Nettoyer le pseudo (caractères invalides pour nom de salon)
+        clean_name = re.sub(r"[^a-zA-Z0-9\-_]", "", user.name.lower())
+        if not clean_name:
+            clean_name = f"user{user.id}"
+        # Limiter à 20 caractères pour éviter les noms trop longs
+        clean_name = clean_name[:20]
+        ticket_name = f"{clean_name}-{str(ticket_num).zfill(4)}"
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -543,7 +558,7 @@ class BasicTicketView(discord.ui.View):
 📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
 > ⚠️ Pas de fichiers/liens.""",
             color=0x5865F2,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(datetime.timezone.utc)
         )
         embed.set_footer(text="Seiko Security")
         view = TicketManagementView(user.id, counter)
@@ -556,7 +571,7 @@ class BasicTicketView(discord.ui.View):
 **Type** : {selected_option}
 **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(datetime.timezone.utc)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
@@ -748,7 +763,6 @@ async def on_ready():
             
             # AJOUTER LES VIEWS PERSISTANTES
             try:
-                bot.add_view(TicketView())
                 bot.add_view(RuleAcceptView())
                 bot.add_view(TicketPanelMultiView({}))
                 print("✅ Views ticket enregistrées")
@@ -1439,29 +1453,48 @@ class TicketConfigView(discord.ui.View):
         sys = self.ticket_system or "default"
         await interaction.response.send_modal(TicketOptionsModal(sys))
 
-class TicketOptionsModal(discord.ui.Modal, title="Options personnalisées"):
-    option1 = discord.ui.TextInput(label="Option 1", placeholder="Support VIP", max_length=100)
-    option2 = discord.ui.TextInput(label="Option 2 (optionnel)", required=False, max_length=100)
-    option3 = discord.ui.TextInput(label="Option 3 (optionnel)", required=False, max_length=100)
-    def __init__(self, sys_name):
+class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du ticket"):
+    def __init__(self, sys_name: str):
         super().__init__()
         self.sys_name = sys_name
+        self.text_inputs = []
+        # Créer 25 champs (max autorisé)
+        for i in range(1, 26):
+            ti = discord.ui.TextInput(
+                label=f"Option {i}",
+                placeholder=f"Ex: Support technique",
+                required=(i == 1),  # la première est obligatoire
+                max_length=100
+            )
+            self.add_item(ti)
+            self.text_inputs.append(ti)
+
     async def on_submit(self, interaction: discord.Interaction):
-        opts = [self.option1.value.strip()]
-        if self.option2.value: opts.append(self.option2.value.strip())
-        if self.option3.value: opts.append(self.option3.value.strip())
+        opts = []
+        for ti in self.text_inputs:
+            val = ti.value.strip()
+            if val:
+                opts.append(val)
+            if len(opts) >= 25:
+                break
+
+        if not opts:
+            await interaction.response.send_message("❌ Au moins une option est requise.", ephemeral=True)
+            return
+
         config.CONFIG.setdefault("ticket_systems", {}).setdefault(self.sys_name, {})
         config.CONFIG["ticket_systems"][self.sys_name]["mode"] = "advanced"
-        config.CONFIG["ticket_systems"][self.sys_name]["options"] = [o for o in opts if o]
+        config.CONFIG["ticket_systems"][self.sys_name]["options"] = opts
         await interaction.response.send_message(
-            f"✅ Mode avancé configuré pour **{self.sys_name}** :\n" + "\n".join(f"• {o}" for o in opts if o),
+            f"✅ **{len(opts)} options** définies pour **{self.sys_name}** :
+" +
+            "\n".join(f"• {o}" for o in opts),
             ephemeral=True
         )
         try:
             await save_guild_config(interaction.guild, config.CONFIG)
         except Exception:
             pass
-
 
 @bot.tree.command(name="ticket-panel", description="Envoie un panneau public de création de ticket")
 @discord.app_commands.checks.has_permissions(administrator=True)
@@ -1532,7 +1565,7 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
         description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket." if mode == "basic"
                     else "Sélectionnez le type de ticket ci-dessous.",
         color=0x5865F2,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(datetime.timezone.utc)
     )
     embed.set_footer(text="Seiko Security")
 
