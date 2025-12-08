@@ -456,7 +456,20 @@ class AdvancedTicketSelect(discord.ui.Select):
         if not clean_name:
             clean_name = f"user{user.id}"
         clean_name = clean_name[:20]
-        ticket_name = f"{clean_name}-{str(counter).zfill(4)}"  # ← ici c'était ticket_num, mais tu veux counter
+        ticket_name = f"{clean_name}-{str(counter).zfill(4)}"
+
+        # === CRÉER / DÉTECTER LA CATÉGORIE TICKETS ===
+        ticket_category = None
+        for cat in guild.categories:
+            if "ticket" in cat.name.lower() or "support" in cat.name.lower():
+                ticket_category = cat
+                break
+        if not ticket_category:
+            overwrites_cat = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
+            }
+            ticket_category = await guild.create_category(name="🎟・Tickets", overwrites=overwrites_cat)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -465,7 +478,12 @@ class AdvancedTicketSelect(discord.ui.Select):
         }
 
         try:
-            ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites)
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=ticket_category,
+                overwrites=overwrites,
+                reason=f"Ticket créé par {user} ({selected_option})"
+            )
         except Exception as e:
             await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
             return
@@ -532,14 +550,28 @@ class BasicTicketView(discord.ui.View):
         selected_option = options[0]  # Toujours le premier en mode basique
         counter = sys_conf.get("counter", 0) + 1
         config.CONFIG["ticket_systems"][self.ticket_system]["counter"] = counter
+
         # Nettoyer le pseudo (caractères invalides pour nom de salon)
         clean_name = re.sub(r"[^a-zA-Z0-9\-_]", "", user.name.lower())
         if not clean_name:
             clean_name = f"user{user.id}"
-        # Limiter à 20 caractères pour éviter les noms trop longs
-        clean_name = clean_name[:20]
-        ticket_name = f"{clean_name}-{str(ticket_num).zfill(4)}"
+        clean_name = clean_name[:20]  # Limiter à 20 caractères
+        ticket_name = f"{clean_name}-{str(counter).zfill(4)}"
 
+        # === CRÉER / DÉTECTER LA CATÉGORIE TICKETS ===
+        ticket_category = None
+        for cat in guild.categories:
+            if "ticket" in cat.name.lower() or "support" in cat.name.lower():
+                ticket_category = cat
+                break
+        if not ticket_category:
+            overwrites_cat = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
+            }
+            ticket_category = await guild.create_category(name="🎟・Tickets", overwrites=overwrites_cat)
+
+        # Permissions du salon
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=False),
@@ -547,7 +579,12 @@ class BasicTicketView(discord.ui.View):
         }
 
         try:
-            ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites)
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=ticket_category,
+                overwrites=overwrites,
+                reason=f"Ticket créé par {user} ({selected_option})"
+            )
         except Exception as e:
             await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
             return
@@ -556,8 +593,8 @@ class BasicTicketView(discord.ui.View):
         embed = discord.Embed(
             title=f"🎟️ {selected_option} - #{counter:06d}",
             description=f"""Bonjour {user.mention},
-📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
-> ⚠️ Pas de fichiers/liens.""",
+    📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
+    > ⚠️ Pas de fichiers/liens.""",
             color=0x5865F2,
             timestamp=datetime.now(timezone.utc)
         )
@@ -569,15 +606,18 @@ class BasicTicketView(discord.ui.View):
         log_embed = discord.Embed(
             title="🎟️ Ticket créé",
             description=f"""**Utilisateur** : {user.mention}
-**Type** : {selected_option}
-**Ticket** : {ticket_channel.mention}""",
+    **Type** : {selected_option}
+    **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
             timestamp=datetime.now(timezone.utc)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
 
-        await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
+        await interaction.response.send_message(
+            f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
+            ephemeral=True
+        )
 
 class TicketManagementView(discord.ui.View):
     """Boutons de gestion du ticket (Claim, Close, Reopen, Delete)"""
@@ -951,6 +991,42 @@ async def start_config(interaction: discord.Interaction):
         "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
 
+@bot.tree.command(name="add-user", description="Ajoute un utilisateur au ticket")
+@discord.app_commands.describe(utilisateur="Utilisateur à ajouter")
+async def add_user(interaction: discord.Interaction, utilisateur: discord.Member):
+    channel = interaction.channel
+    # Vérifier si on est dans un ticket
+    if not (
+        channel.name.startswith(("ticket-", "ticket_")) or 
+        (channel.category and "ticket" in channel.category.name.lower())
+    ):
+        await interaction.response.send_message("❌ Cette commande ne fonctionne que dans un salon de ticket.", ephemeral=True)
+        return
+
+    # Ajouter les permissions
+    await channel.set_permissions(
+        utilisateur,
+        read_messages=True,
+        send_messages=True,
+        attach_files=False,
+        embed_links=False
+    )
+    await interaction.response.send_message(f"✅ {utilisateur.mention} a été ajouté au ticket.")
+
+@bot.tree.command(name="remove-user", description="Retire un utilisateur du ticket")
+@discord.app_commands.describe(utilisateur="Utilisateur à retirer")
+async def remove_user(interaction: discord.Interaction, utilisateur: discord.Member):
+    channel = interaction.channel
+    if not (
+        channel.name.startswith(("ticket-", "ticket_")) or 
+        (channel.category and "ticket" in channel.category.name.lower())
+    ):
+        await interaction.response.send_message("❌ Cette commande ne fonctionne que dans un salon de ticket.", ephemeral=True)
+        return
+
+    # Retirer les permissions
+    await channel.set_permissions(utilisateur, overwrite=None)
+    await interaction.response.send_message(f"✅ {utilisateur.mention} a été retiré du ticket.")
 
 # === VIEWS POUR /start ===
 class LogCreationChoiceView(discord.ui.View):
