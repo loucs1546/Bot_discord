@@ -450,13 +450,13 @@ class AdvancedTicketSelect(discord.ui.Select):
 
         counter = sys_conf.get("counter", 0) + 1
         config.CONFIG["ticket_systems"][self.ticket_system]["counter"] = counter
-        # Nettoyer le pseudo (caractères invalides pour nom de salon)
+
+        # Nettoyer le pseudo
         clean_name = re.sub(r"[^a-zA-Z0-9\-_]", "", user.name.lower())
         if not clean_name:
             clean_name = f"user{user.id}"
-        # Limiter à 20 caractères pour éviter les noms trop longs
         clean_name = clean_name[:20]
-        ticket_name = f"{clean_name}-{str(ticket_num).zfill(4)}"
+        ticket_name = f"{clean_name}-{str(counter).zfill(4)}"  # ← ici c'était ticket_num, mais tu veux counter
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -470,12 +470,12 @@ class AdvancedTicketSelect(discord.ui.Select):
             await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
             return
 
-        # Message dans le ticket
+        # === Message dans le ticket ===
         embed = discord.Embed(
             title=f"🎟️ {selected_option} - #{counter:06d}",
             description=f"""Bonjour {user.mention},
-📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
-> ⚠️ Pas de fichiers/liens.""",
+    📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
+    > ⚠️ Pas de fichiers/liens.""",
             color=0x5865F2,
             timestamp=datetime.now(datetime.timezone.utc)
         )
@@ -483,22 +483,23 @@ class AdvancedTicketSelect(discord.ui.Select):
         view = TicketManagementView(user.id, counter)
         await ticket_channel.send(embed=embed, view=view)
 
-        # Logs
+        # === Logs ===
         log_embed = discord.Embed(
             title="🎟️ Ticket créé",
             description=f"""**Utilisateur** : {user.mention}
-**Type** : {selected_option}""",
-            await interaction.response.send_message(
-                f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
-                ephemeral=True
-            ),
+    **Type** : {selected_option}
+    **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
             timestamp=datetime.now(datetime.timezone.utc)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
 
-        await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
+        # === Réponse à l'utilisateur ===
+        await interaction.response.send_message(
+            f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
+            ephemeral=True
+        )
 
 class AdvancedTicketView(discord.ui.View):
     def __init__(self, ticket_system: str):
