@@ -322,17 +322,15 @@ class RuleAcceptView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ J'accepte le règlement", style=discord.ButtonStyle.green, custom_id="rule_accept_v3")
+    @discord.ui.button(label="✅ J'accepte le règlement", style=discord.ButtonStyle.green, custom_id="rule_accept_final")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
 
-        # Supprimer le rôle "En attente de vérification"
         wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
         if wait_role and wait_role in user.roles:
             await user.remove_roles(wait_role)
 
-        # Donner le rôle par défaut (de /start)
         default_role_id = config.CONFIG.get("roles", {}).get("default")
         if default_role_id:
             default_role = guild.get_role(default_role_id)
@@ -364,17 +362,21 @@ async def reach_id(interaction: discord.Interaction, user_id: str):
         except Exception as e:
             await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
 
-@bot.tree.command(name="rule", description="Afficher le règlement du serveur")
+@bot.tree.command(name="rule", description="Afficher le règlement comme sur la photo")
 async def rule(interaction: discord.Interaction):
-    rules = config.CONFIG.get("rules")
-    if not rules:
-        await interaction.response.send_message("❌ Aucun règlement configuré. Utilisez `/rule-config`.", ephemeral=True)
-        return
+    # === 1. Répondre immédiatement pour éviter le timeout ===
+    await interaction.response.defer()  # 👈 Crucial
 
     guild = interaction.guild
     channel = interaction.channel
 
-    # Créer le rôle "En attente de vérification" s'il n'existe pas
+    # === 2. Vérifier qu’un règlement existe ===
+    rules = config.CONFIG.get("rules")
+    if not rules:
+        await interaction.followup.send("❌ Aucun règlement configuré. Utilisez `/rule-config`.", ephemeral=True)
+        return
+
+    # === 3. S'assurer que le rôle "En attente" existe ===
     wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
     if not wait_role:
         wait_role = await guild.create_role(
@@ -382,33 +384,26 @@ async def rule(interaction: discord.Interaction):
             color=discord.Color.dark_gray(),
             hoist=False,
             mentionable=False,
-            reason="Règlement Seiko"
+            reason="Système de règlement"
         )
 
-    # Bloquer tous les salons sauf celui-ci
-    for ch in guild.channels:
-        if isinstance(ch, discord.TextChannel):
-            await ch.set_permissions(wait_role, read_messages=False)
+    # === 4. Ne PAS boucler sur TOUS les salons (trop lent) ===
+    # → Seulement bloquer les salons que le bot a déjà configurés (logs, etc.)
+    # → OU laisser la gestion manuelle (recommandé pour éviter timeout)
+    # → Ici, on ne touche qu'au salon courant
     await channel.set_permissions(wait_role, read_messages=True, send_messages=False)
 
-    # Créer l'embed comme sur ta photo
+    # === 5. Créer l'embed comme sur ta photo ===
     embed = discord.Embed(
         title="📜 Règlement Discord",
         color=0x2f3136,
         timestamp=datetime.utcnow()
     )
-
-    # Section 1 : Règle Généraux
     embed.add_field(
         name="🔷 Règle Généraux",
-        value=(
-            "+ Avoir un Pseudo Rôles play\n"
-            "+ Créer un environnement Sain"
-        ),
+        value="+ Avoir un Pseudo Rôles play\n+ Créer un environnement Sain",
         inline=False
     )
-
-    # Section 2 : Règle Textuel
     embed.add_field(
         name="🔷 Règle Textuel",
         value=(
@@ -422,18 +417,11 @@ async def rule(interaction: discord.Interaction):
         ),
         inline=False
     )
-
-    # Section 3 : Règle Vocal
     embed.add_field(
         name="🔷 Règle Vocal",
-        value=(
-            "- Aucun bruit gênant, fort ou aigu.\n"
-            "- Aucune soundboard"
-        ),
+        value="- Aucun bruit gênant, fort ou aigu.\n- Aucune soundboard",
         inline=False
     )
-
-    # Section 4 : Discord ToS / Guidelines
     embed.add_field(
         name="🔷 Discord Tos / Guidelines",
         value=(
@@ -442,15 +430,13 @@ async def rule(interaction: discord.Interaction):
         ),
         inline=False
     )
-
-    # Image de fond
-    embed.set_image(url="https://i.imgur.com/7K9YhUa.png")  # Tu peux changer l'URL
+    embed.set_image(url="https://i.imgur.com/7K9YhUa.png")
     embed.set_footer(text="L'équipe D'Impact Life")
 
-    # Envoyer le message
+    # === 6. Envoyer avec followup (pas response) ===
     view = RuleAcceptView()
-    bot.add_view(view)  # Pour persistance
-    await interaction.response.send_message(embed=embed, view=view)
+    bot.add_view(view)  # pour persistance après reboot
+    await interaction.followup.send(embed=embed, view=view)
 
 class TicketChoiceView(discord.ui.View):
     def __init__(self, guild: discord.Guild, ticket_system: str):
