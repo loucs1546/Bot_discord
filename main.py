@@ -1486,12 +1486,8 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
         config.CONFIG.setdefault("ticket_systems", {}).setdefault(self.sys_name, {})
         config.CONFIG["ticket_systems"][self.sys_name]["mode"] = "advanced"
         config.CONFIG["ticket_systems"][self.sys_name]["options"] = opts
-        await interaction.response.send_message(
-            f"✅ **{len(opts)} options** définies pour **{self.sys_name}** :
-" +
-            "\n".join(f"• {o}" for o in opts),
-            ephemeral=True
-        )
+        message = f"✅ **{len(opts)} options** définies pour **{self.sys_name}** :\n" + "\n".join(f"• {o}" for o in opts)
+        await interaction.response.send_message(message, ephemeral=True)
         try:
             await save_guild_config(interaction.guild, config.CONFIG)
         except Exception:
