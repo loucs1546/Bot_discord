@@ -903,8 +903,7 @@ async def start_config(interaction: discord.Interaction):
                 ("🛠️・commandes", "commands"),
                 ("📛・profil", "profile"),
                 ("🔍・contenu", "content"),
-                ("💥・bavures", "bavures"),
-                ("🎉・giveaway", "giveaway")
+                ("💥・bavures", "bavures")
             ]
             channel_ids = {}
             for name, key in salon_configs:
@@ -937,8 +936,8 @@ async def start_config(interaction: discord.Interaction):
     # Supprimer message en attente et envoyer confirmation
     await wait_msg.delete()
     await interaction.channel.send(
-        "✅ **Configuration terminée !**",\n
-        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/config`.",\n
+        "✅ **Configuration terminée !**",
+        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/config`.",
         "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
 
