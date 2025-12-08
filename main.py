@@ -302,22 +302,34 @@ class TicketChoiceSelect(discord.ui.Select):
         # On va stocker le choix et afficher le bouton "Créer"
         pass
 
-@bot.tree.command(name="rule-config", description="Configurer le règlement du serveur")
+@bot.tree.command(name="rule-config", description="Configurer le règlement du serveur (texte libre)")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def rule_config(interaction: discord.Interaction):
-    class RuleModal(discord.ui.Modal, title="📝 Règlement du serveur"):
-        content = discord.ui.TextInput(
-            label="Contenu du règlement",
-            style=discord.TextStyle.paragraph,
-            placeholder="Ex: 1. Pas de spam...\n2. Respect mutuel...",
-            max_length=4000,
-            required=True
-        )
-        async def on_submit(self, i: discord.Interaction):
-            config.CONFIG["rules"] = self.content.value
-            await i.response.send_message("✅ Règlement enregistré.", ephemeral=True)
+    await interaction.response.send_message("📌 Veuillez **coller le règlement complet** dans le chat (vous avez 5 minutes).", ephemeral=True)
 
-    await interaction.response.send_modal(RuleModal())
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel
+
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=300)
+        config.CONFIG["rules"] = msg.content
+        await msg.delete()
+        await interaction.followup.send("✅ Règlement enregistré.", ephemeral=True)
+
+        # === SAUVEGARDER DANS 📁-sauvegarde ===
+        guild = interaction.guild
+        save_ch = discord.utils.get(guild.text_channels, name="📁-sauvegarde")
+        if not save_ch:
+            overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
+            save_ch = await guild.create_text_channel("📁-sauvegarde", overwrites=overwrites)
+
+        import json, io
+        data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+        file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
+        await save_ch.send("💾 **Sauvegarde mise à jour (règlement inclus)**", file=file)
+
+    except asyncio.TimeoutError:
+        await interaction.followup.send("❌ Temps écoulé. Réessayez `/rule-config`.", ephemeral=True)
 
 class RuleAcceptView(discord.ui.View):
     def __init__(self):
@@ -375,37 +387,39 @@ async def rule(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Aucun règlement configuré. Utilisez `/rule-config`.", ephemeral=True)
         return
 
-    # Créer le rôle "En attente de vérification" s'il n'existe pas
-    wait_role = discord.utils.get(interaction.guild.roles, name="En attente de vérification")
+    # Répondre IMMÉDIATEMENT
+    await interaction.response.defer()  # 👈 On gèle l'interaction, on peut répondre plus tard
+
+    guild = interaction.guild
+
+    # Créer le rôle "En attente de vérification" si absent
+    wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
     if not wait_role:
-        wait_role = await interaction.guild.create_role(
+        wait_role = await guild.create_role(
             name="En attente de vérification",
             color=discord.Color.dark_gray(),
             hoist=False,
             mentionable=False,
-            reason="Règlement automatique Seiko"
+            reason="Règlement Seiko"
         )
-        # Désactiver l'accès à tous les salons sauf #règles (ou celui courant)
-        for channel in interaction.guild.channels:
+        # Bloquer l'accès à tous les salons
+        for channel in guild.channels:
             if isinstance(channel, discord.TextChannel):
                 await channel.set_permissions(wait_role, read_messages=False)
-
-        # Donner accès au salon actuel
+        # Autoriser accès au salon actuel
         await interaction.channel.set_permissions(wait_role, read_messages=True, send_messages=False)
 
     embed = discord.Embed(
         title="📜 Règlement du serveur",
         description=rules,
         color=0x2f3136,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(discord.utils.UTC)  # ✅ Corrige aussi le warning utcnow()
     )
     embed.set_footer(text="Cliquez sur ✅ pour accepter et accéder au serveur.")
 
     view = RuleAcceptView()
-    await interaction.response.send_message(embed=embed, view=view)
-
-    # Enregistrer la vue persistante
-    bot.add_view(view)
+    # Envoyer le message **dans le salon**, pas en réponse éphémère
+    await interaction.followup.send(embed=embed, view=view)
 
 class TicketChoiceView(discord.ui.View):
     def __init__(self, guild: discord.Guild, ticket_system: str):
@@ -466,7 +480,7 @@ class TicketChoiceView(discord.ui.View):
 📝 Décrivez votre demande en détail. Un membre de l’équipe vous répondra bientôt.
 > ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.""",
             color=0x5865F2,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(discord.utils.UTC)
         )
         embed.set_footer(text="Seiko Security • Système de tickets")
         view = TicketManagementView(user.id, counter)
@@ -479,7 +493,7 @@ class TicketChoiceView(discord.ui.View):
 **Type** : {selected_option}
 **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(discord.utils.UTC)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
@@ -600,7 +614,7 @@ class TicketManagementView(discord.ui.View):
                         title=f"🗂️ Historique ticket - {self.ticket_channel.name}",
                         description=full_log,
                         color=0x5865F2,
-                        timestamp=datetime.utcnow()
+                        timestamp=datetime.now(discord.utils.UTC)
                     )
                     owner = confirm_interaction.guild.get_member(self.owner_id) if self.owner_id else None
                     if owner:
@@ -668,7 +682,7 @@ class TicketView(discord.ui.View):
                         "> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets."
                     ),
                     color=0x5865F2,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now(discord.utils.UTC)
                 )
                 embed.set_footer(text="Seiko Security • Ticket automatique")
                 view = TicketManagementView(user.id, counter)
@@ -680,7 +694,7 @@ class TicketView(discord.ui.View):
                 **Type** : {selected_option}
                 **Ticket** : {ticket_channel.mention}""",
                     color=0x00ff00,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now(discord.utils.UTC)
                 )
                 log_embed.set_thumbnail(url=user.display_avatar.url)
                 await send_log_to(bot, "ticket", log_embed)
@@ -936,8 +950,8 @@ async def start_config(interaction: discord.Interaction):
     # Supprimer message en attente et envoyer confirmation
     await wait_msg.delete()
     await interaction.channel.send(
-        "✅ **Configuration terminée !**",
-        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/config`.",
+        "✅ **Configuration terminée !**\n"
+        "🔧 Vous pouvez modifier les paramètres à tout moment avec `/config`.\n"
         "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
 
@@ -1561,7 +1575,7 @@ async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison:
         title="👢 Kick",
         description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
         color=0xff9900,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(discord.utils.UTC)
     )
     ch = get_sanction_channel(bot)
     if ch: 
@@ -1592,7 +1606,7 @@ async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: i
         title="🔨 Ban",
         description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
         color=0xff0000,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(discord.utils.UTC)
     )
     ch = get_sanction_channel(bot)
     if ch: 
@@ -1742,7 +1756,7 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
         )
         await interaction.followup.send(summary, ephemeral=True)
         try:
-            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.utcnow())
+            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.now(discord.utils.UTC))
             await send_log_to(bot, "commands", embed)
         except Exception:
             pass
