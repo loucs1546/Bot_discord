@@ -337,20 +337,22 @@ class RuleAcceptView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ J'accepte", style=discord.ButtonStyle.green, custom_id="rule_accept_v1")
+    @discord.ui.button(label="✅ J'accepte le règlement", style=discord.ButtonStyle.green, custom_id="rule_accept_v2")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
 
+        # Supprimer le rôle "En attente"
         wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
         if wait_role and wait_role in user.roles:
             await user.remove_roles(wait_role)
 
+        # Donner le rôle par défaut (de /start)
         default_role_id = config.CONFIG.get("roles", {}).get("default")
         if default_role_id:
-            role = guild.get_role(default_role_id)
-            if role:
-                await user.add_roles(role)
+            default_role = guild.get_role(default_role_id)
+            if default_role:
+                await user.add_roles(default_role)
 
         await interaction.response.send_message("✅ Bienvenue sur le serveur !", ephemeral=True)
 
@@ -377,47 +379,46 @@ async def reach_id(interaction: discord.Interaction, user_id: str):
         except Exception as e:
             await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
 
-@bot.tree.command(name="rule", description="Afficher le règlement avec validation")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@bot.tree.command(name="rule", description="Afficher le règlement dans le salon (comme /say)")
 async def rule(interaction: discord.Interaction):
     rules = config.CONFIG.get("rules")
     if not rules:
         await interaction.response.send_message("❌ Aucun règlement configuré. Utilisez `/rule-config`.", ephemeral=True)
         return
 
-    # Répondre immédiatement
-    await interaction.response.defer()
-
     guild = interaction.guild
     channel = interaction.channel
 
-    # Créer rôle "En attente" si absent
+    # S'assurer que le rôle "En attente" existe
     wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
     if not wait_role:
         wait_role = await guild.create_role(
             name="En attente de vérification",
             color=discord.Color.dark_gray(),
-            reason="Système de règlement Seiko"
+            reason="Système Seiko"
         )
 
-    # Bloquer accès à TOUS les salons SAUF celui-ci
-    for ch in guild.channels:
-        if isinstance(ch, discord.TextChannel):
-            await ch.set_permissions(wait_role, read_messages=False)
+    # Donner accès AU SEUL salon actuel
     await channel.set_permissions(wait_role, read_messages=True, send_messages=False)
 
-    # Envoyer le règlement
+    # Bloquer TOUS les autres salons (une seule fois)
+    for ch in guild.channels:
+        if isinstance(ch, discord.TextChannel) and ch != channel:
+            await ch.set_permissions(wait_role, read_messages=False)
+
+    # Envoyer le message public (comme /say)
     embed = discord.Embed(
         title="📜 Règlement du serveur",
         description=rules,
         color=0x2f3136,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.utcnow()
     )
-    embed.set_footer(text="Cliquez sur ✅ pour accepter.")
+    embed.set_footer(text="Cliquez sur ✅ pour accepter le règlement et accéder au serveur.")
 
     view = RuleAcceptView()
-    bot.add_view(view)  # pour persistance
-    await interaction.followup.send(embed=embed, view=view)
+    bot.add_view(view)  # pour persistance après reboot
+
+    await interaction.response.send_message(embed=embed, view=view)
 
 class TicketChoiceView(discord.ui.View):
     def __init__(self, guild: discord.Guild, ticket_system: str):
@@ -433,17 +434,16 @@ class TicketChoiceView(discord.ui.View):
         guild = self.guild or interaction.guild
         user = interaction.user
 
-        # Empêcher les doublons
+        # Empêcher double ticket
         for ch in guild.channels:
             if ch.name.startswith("ticket-") and str(user.id) in ch.name:
                 await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=True)
                 return
 
-        # Récupérer la config du système
         systems = config.CONFIG.get("ticket_systems", {})
         sys_conf = systems.get(self.ticket_system)
         if not sys_conf:
-            await interaction.response.send_message("❌ Système de ticket introuvable.", ephemeral=True)
+            await interaction.response.send_message("❌ Système introuvable.", ephemeral=True)
             return
 
         counter = sys_conf.get("counter", 0) + 1
@@ -452,21 +452,12 @@ class TicketChoiceView(discord.ui.View):
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=False,
-                embed_links=False
-            ),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=False),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
         }
 
         try:
-            ticket_channel = await guild.create_text_channel(
-                name=ticket_name,
-                overwrites=overwrites,
-                reason=f"Ticket par {user} ({selected_option})"
-            )
+            ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites)
         except Exception as e:
             await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
             return
@@ -475,31 +466,29 @@ class TicketChoiceView(discord.ui.View):
         embed = discord.Embed(
             title=f"🎟️ {selected_option} - #{counter:06d}",
             description=f"""Bonjour {user.mention},
-📝 Décrivez votre demande en détail. Un membre de l’équipe vous répondra bientôt.
-> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.""",
+📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
+> ⚠️ Pas de fichiers/liens dans les tickets.""",
             color=0x5865F2,
-            timestamp=datetime.now(discord.utils.UTC)
+            timestamp=datetime.utcnow()
         )
-        embed.set_footer(text="Seiko Security • Système de tickets")
+        embed.set_footer(text="Seiko Security")
         view = TicketManagementView(user.id, counter)
         await ticket_channel.send(embed=embed, view=view)
 
-        # Log
+        # Logs
         log_embed = discord.Embed(
             title="🎟️ Ticket créé",
-            description=f"""**Utilisateur** : {user.mention} (`{user}`)
+            description=f"""**Utilisateur** : {user.mention}
 **Type** : {selected_option}
 **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
-            timestamp=datetime.now(discord.utils.UTC)
+            timestamp=datetime.utcnow()
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
 
-        await interaction.response.send_message(
-            f"✅ Ticket créé : {ticket_channel.mention}",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
+
 
 class TicketManagementView(discord.ui.View):
     """Boutons de gestion du ticket (Claim, Close, Reopen, Delete)"""
@@ -1510,7 +1499,28 @@ class TicketSystemSelectButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         await send_public_ticket_panel(interaction, self.sys_name)
         await interaction.followup.send(f"✅ Panel **{self.sys_name}** envoyé dans {interaction.channel.mention}.", ephemeral=True)
-        self.view.stop()
+        self.view.stop(
+        )
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    """Donne automatiquement le rôle 'En attente de vérification' à tout nouveau membre."""
+    guild = member.guild
+    wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
+    if not wait_role:
+        # Créer le rôle si absent
+        wait_role = await guild.create_role(
+            name="En attente de vérification",
+            color=discord.Color.dark_gray(),
+            hoist=False,
+            mentionable=False,
+            reason="Système de règlement Seiko"
+        )
+        # Bloquer tous les salons sauf ceux où /rule est posté (on ne peut pas savoir à l'avance → on bloquera au /rule)
+    try:
+        await member.add_roles(wait_role, reason="Nouveau membre - doit accepter le règlement")
+    except Exception:
+        pass  # ignore si permiss
 
 async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: str):
     systems = config.CONFIG.get("ticket_systems", {})
@@ -1520,7 +1530,7 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
 
     mode = sys_conf.get("mode", "basic")
     if mode == "basic":
-        # Mode basique : bouton direct, pas de select
+        # Mode BASIQUE = juste un bouton "Créer un ticket"
         embed = discord.Embed(
             title="🎟️ Support",
             description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket.",
@@ -1531,10 +1541,10 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
         view = TicketView(ticket_system=sys_name)
         await interaction.channel.send(embed=embed, view=view)
     else:
-        # Mode avancé : select + bouton (via TicketChoiceView)
+        # Mode AVANCÉ = choix + bouton
         embed = discord.Embed(
             title="🎟️ Support",
-            description="Sélectionnez le type de ticket.",
+            description="Sélectionnez le type de ticket, puis cliquez sur **Créer le Ticket**.",
             color=0x5865F2,
             timestamp=datetime.utcnow()
         )
