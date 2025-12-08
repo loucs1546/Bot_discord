@@ -158,7 +158,7 @@ class LoggingCog(commands.Cog):
 
                 embed = discord.Embed(
                     title="👑 Rôles modifiés",
-                    description=f"{after.mention}\n{desc}**Fait par** : {moderator.mention if moderator else 'Inconnu'}",
+                    description=f"{after.mention},\n{desc}\n **Fait par** : {moderator.mention if moderator else 'Inconnu'}",
                     color=0xffaa00,
                     timestamp=discord.utils.utcnow()
                 )
