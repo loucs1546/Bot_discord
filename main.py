@@ -505,78 +505,77 @@ class TicketView(discord.ui.View):
     def __init__(self, ticket_system=None):
         super().__init__(timeout=None)
         self.ticket_system = ticket_system
-    @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id="create_ticket")
-    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild = interaction.guild
-        user = interaction.user
-        # Vérifier qu'il n'a pas déjà un ticket
-        for channel in guild.channels:
-            if channel.name.startswith("ticket-") and str(user.id) in channel.name:
-                await interaction.response.send_message("Vous avez déjà un ticket ouvert !", ephemeral=True)
+        @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id="create_ticket")
+        async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+            guild = interaction.guild
+            user = interaction.user
+            sys = self.ticket_system or "default"
+            systems = config.CONFIG.get("ticket_systems", {})
+            sys_conf = systems.get(sys)
+            if not sys_conf:
+                await interaction.response.send_message("❌ Système de ticket introuvable.", ephemeral=True)
                 return
-        # Récupérer la config du système
-        sys = self.ticket_system or "default"
-        systems = config.CONFIG.get("ticket_systems", {})
-        sys_conf = systems.get(sys)
-        if not sys_conf:
-            await interaction.response.send_message("❌ Système de ticket introuvable.", ephemeral=True)
-            return
-        mode = sys_conf.get("mode", "basic")
-        options = sys_conf.get("options", ["Support Général"])
-        counter = sys_conf.get("counter", 0)
-        if mode == "basic":
-            selected_option = options[0] if options else "Support Général"
-            ticket_num = counter + 1
-            config.CONFIG["ticket_systems"][sys]["counter"] = ticket_num
-            ticket_name = f"ticket-{str(ticket_num).zfill(6)}"
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                user: discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=False,
-                    embed_links=False
-                ),
-                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
-            }
-            try:
-                ticket_channel = await guild.create_text_channel(
-                    name=ticket_name,
-                    overwrites=overwrites,
-                    reason=f"Ticket créé par {user} ({selected_option})"
+
+            mode = sys_conf.get("mode", "basic")
+            options = sys_conf.get("options", ["Support Général"])
+
+            # === MODE BASIQUE : création directe ===
+            if mode == "basic":
+                # Vérification ticket existant
+                for channel in guild.channels:
+                    if channel.name.startswith("ticket-") and str(user.id) in channel.name:
+                        await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert !", ephemeral=True)
+                        return
+
+                selected_option = options[0] if options else "Support Général"
+                counter = sys_conf.get("counter", 0) + 1
+                config.CONFIG["ticket_systems"][sys]["counter"] = counter
+                ticket_name = f"ticket-{str(counter).zfill(6)}"
+
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=False, embed_links=False),
+                    guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+                }
+                try:
+                    ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites, reason=f"Ticket par {user}")
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+                    return
+
+                embed = discord.Embed(
+                    title=f"🎟️ {selected_option} - #{counter:06d}",
+                    description=f"Bonjour {user.mention},
+    📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.",
+                    color=0x5865F2,
+                    timestamp=datetime.utcnow()
                 )
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Erreur création ticket: {e}", ephemeral=True)
+                embed.set_footer(text="Seiko Security • Ticket automatique")
+                view = TicketManagementView(user.id, counter)
+                await ticket_channel.send(embed=embed, view=view)
+
+                # Logs
+                log_embed = discord.Embed(
+                    title="🎟️ Ticket créé (mode basique)",
+                    description=f"**Utilisateur** : {user.mention}
+    **Type** : {selected_option}
+    **Ticket** : {ticket_channel.mention}",
+                    color=0x00ff00,
+                    timestamp=datetime.utcnow()
+                )
+                log_embed.set_thumbnail(url=user.display_avatar.url)
+                await send_log_to(bot, "ticket", log_embed)
+
+                await interaction.response.send_message(f"✅ Ticket créé : {ticket_channel.mention}", ephemeral=True)
                 return
+
+            # === MODE AVANCÉ : affiche select + bouton ===
             embed = discord.Embed(
-                title=f"🎟️ {selected_option} - #{ticket_num:06d}",
-                description=f"Bonjour {user.mention},\n\n📝 Décrivez votre demande en détail. Un membre de l'équipe vous répondra bientôt.\n\n> ⚠️ Les fichiers et liens ne sont pas autorisés dans les tickets.",
-                color=0x5865F2,
-                timestamp=datetime.utcnow()
+                title="🎟️ Créer un Ticket",
+                description="Sélectionnez le type de ticket et cliquez sur **Créer le Ticket**.",
+                color=0x5865F2
             )
-            embed.set_footer(text="Seiko Security • Système de tickets")
-            view = TicketManagementView(user.id, ticket_num)
-            await ticket_channel.send(embed=embed, view=view)
-            log_embed = discord.Embed(
-                title="🎟️ Ticket créé",
-                description=f"**Utilisateur** : {user.mention} (`{user}`)\n**Type** : {selected_option}\n**Ticket** : {ticket_channel.mention}",
-                color=0x00ff00,
-                timestamp=datetime.utcnow()
-            )
-            log_embed.set_thumbnail(url=user.display_avatar.url)
-            await send_log_to(bot, "ticket", log_embed)
-            await interaction.response.send_message(
-                f"✅ Ticket créé: {ticket_channel.mention}\n💬 Type: **{selected_option}**",
-                ephemeral=True
-            )
-            return
-        # Sinon afficher l'interface de choix
-        embed = discord.Embed(
-            title="🎟️ Créer un Ticket",
-            description="Sélectionnez le type de ticket et cliquez sur 'Créer le Ticket'",
-            color=0x5865F2
-        )
-        await interaction.response.send_message(embed=embed, view=TicketChoiceView(guild, sys), ephemeral=True)
+            await interaction.response.send_message(embed=embed, view=TicketChoiceView(guild, sys), ephemeral=True)
 
 # TicketControls est maintenant un alias pour TicketManagementView (compatibilité)
 class TicketControls(TicketManagementView):
@@ -885,20 +884,29 @@ class FinalSecurityConfigView(discord.ui.View):
         self.anti_raid = config.CONFIG.get("security", {}).get("anti_raid", True)
         self.anti_hack = config.CONFIG.get("security", {}).get("anti_hack", True)
         self.update_buttons()
+
     def update_buttons(self):
         self.clear_items()
         self.add_item(self._make_button("Anti-Spam", self.anti_spam, self.toggle_spam))
         self.add_item(self._make_button("Anti-Raid", self.anti_raid, self.toggle_raid))
         self.add_item(self._make_button("Anti-Hack", self.anti_hack, self.toggle_hack))
-        self.add_item(discord.ui.Button(label="✅ Valider", style=discord.ButtonStyle.green, custom_id="finish_sec"))
+        finish_btn = discord.ui.Button(label="✅ Valider", style=discord.ButtonStyle.green, custom_id="finish_sec")
+        finish_btn.callback = self.finish
+        self.add_item(finish_btn)
+
     def _make_button(self, label, enabled, callback):
         btn = discord.ui.Button(label=label, style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary)
         btn.callback = callback
         return btn
+
     async def toggle_spam(self, i): self.anti_spam = not self.anti_spam; config.CONFIG.setdefault("security", {})["anti_spam"] = self.anti_spam; self.update_buttons(); await i.response.edit_message(view=self)
     async def toggle_raid(self, i): self.anti_raid = not self.anti_raid; config.CONFIG.setdefault("security", {})["anti_raid"] = self.anti_raid; self.update_buttons(); await i.response.edit_message(view=self)
     async def toggle_hack(self, i): self.anti_hack = not self.anti_hack; config.CONFIG.setdefault("security", {})["anti_hack"] = self.anti_hack; self.update_buttons(); await i.response.edit_message(view=self)
 
+    async def finish(self, interaction: discord.Interaction):
+        # Sauvegarde + confirmation
+        await interaction.response.defer()  # Valide l'interaction pour éviter le "échec"
+        self.stop()
 
 @bot.tree.command(name="reset", description="Réinitialise TOUTES les données du bot pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
@@ -1049,20 +1057,28 @@ class SecurityConfigView(discord.ui.View):
         self.anti_raid = config.CONFIG.get("security", {}).get("anti_raid", False)
         self.anti_hack = config.CONFIG.get("security", {}).get("anti_hack", False)
         self.update_buttons()
+
     def update_buttons(self):
         self.clear_items()
         self.add_item(self._make_button("Anti-Spam", self.anti_spam, self.toggle_spam))
         self.add_item(self._make_button("Anti-Raid", self.anti_raid, self.toggle_raid))
         self.add_item(self._make_button("Anti-Hack", self.anti_hack, self.toggle_hack))
-        self.add_item(discord.ui.Button(label="✅ Terminer", style=discord.ButtonStyle.green, custom_id="finish"))
+        finish_btn = discord.ui.Button(label="✅ Terminer", style=discord.ButtonStyle.green, custom_id="finish")
+        finish_btn.callback = self.finish
+        self.add_item(finish_btn)
+
     def _make_button(self, label, enabled, callback):
         btn = discord.ui.Button(label=label, style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary)
         btn.callback = callback
         return btn
+
     async def toggle_spam(self, i): self.anti_spam = not self.anti_spam; config.CONFIG.setdefault("security", {})["anti_spam"] = self.anti_spam; self.update_buttons(); await i.response.edit_message(view=self)
     async def toggle_raid(self, i): self.anti_raid = not self.anti_raid; config.CONFIG.setdefault("security", {})["anti_raid"] = self.anti_raid; self.update_buttons(); await i.response.edit_message(view=self)
     async def toggle_hack(self, i): self.anti_hack = not self.anti_hack; config.CONFIG.setdefault("security", {})["anti_hack"] = self.anti_hack; self.update_buttons(); await i.response.edit_message(view=self)
 
+    async def finish(self, interaction: discord.Interaction):
+        await interaction.response.send_message("✅ Configuration de sécurité sauvegardée.", ephemeral=True)
+        self.stop()
 
 # ============================
 # === COMMANDES DE LOGS ===
