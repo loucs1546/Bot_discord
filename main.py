@@ -557,12 +557,11 @@ class TicketView(discord.ui.View):
                 view = TicketManagementView(user.id, counter)
                 await ticket_channel.send(embed=embed, view=view)
 
-                # Logs
                 log_embed = discord.Embed(
-                    title="🎟️ Ticket créé (mode basique)",
-                    description=f"**Utilisateur** : {user.mention}
-    **Type** : {selected_option}
-    **Ticket** : {ticket_channel.mention}",
+                    title="🎟️ Ticket créé",
+                    description=f"""**Utilisateur** : {user.mention}
+                **Type** : {selected_option}
+                **Ticket** : {ticket_channel.mention}""",
                     color=0x00ff00,
                     timestamp=datetime.utcnow()
                 )
