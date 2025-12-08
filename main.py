@@ -488,10 +488,10 @@ class AdvancedTicketSelect(discord.ui.Select):
             title="🎟️ Ticket créé",
             description=f"""**Utilisateur** : {user.mention}
 **Type** : {selected_option}""",
-        await interaction.response.send_message(
-            f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
-            ephemeral=True
-        ),
+            await interaction.response.send_message(
+                f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
+                ephemeral=True
+            ),
             color=0x00ff00,
             timestamp=datetime.now(datetime.timezone.utc)
         )
