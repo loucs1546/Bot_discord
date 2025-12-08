@@ -377,7 +377,7 @@ async def rule(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📜 Règlement Discord",
         color=0x2f3136,
-        timestamp=datetime.now(datetime.timezone.utc)
+        timestamp=datetime.now(timezone.utc)
     )
     embed.add_field(
         name="🔷 Règle Généraux",
@@ -477,7 +477,7 @@ class AdvancedTicketSelect(discord.ui.Select):
     📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
     > ⚠️ Pas de fichiers/liens.""",
             color=0x5865F2,
-            timestamp=datetime.now(datetime.timezone.utc)
+            timestamp=datetime.now(timezone.utc)
         )
         embed.set_footer(text="Seiko Security")
         view = TicketManagementView(user.id, counter)
@@ -490,7 +490,7 @@ class AdvancedTicketSelect(discord.ui.Select):
     **Type** : {selected_option}
     **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
-            timestamp=datetime.now(datetime.timezone.utc)
+            timestamp=datetime.now(timezone.utc)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
@@ -559,7 +559,7 @@ class BasicTicketView(discord.ui.View):
 📝 Décrivez votre demande. Un membre de l’équipe vous répondra bientôt.
 > ⚠️ Pas de fichiers/liens.""",
             color=0x5865F2,
-            timestamp=datetime.now(datetime.timezone.utc)
+            timestamp=datetime.now(timezone.utc)
         )
         embed.set_footer(text="Seiko Security")
         view = TicketManagementView(user.id, counter)
@@ -572,7 +572,7 @@ class BasicTicketView(discord.ui.View):
 **Type** : {selected_option}
 **Ticket** : {ticket_channel.mention}""",
             color=0x00ff00,
-            timestamp=datetime.now(datetime.timezone.utc)
+            timestamp=datetime.now(timezone.utc)
         )
         log_embed.set_thumbnail(url=user.display_avatar.url)
         await send_log_to(bot, "ticket", log_embed)
@@ -1459,12 +1459,12 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
         super().__init__()
         self.sys_name = sys_name
         self.text_inputs = []
-        # Créer 25 champs (max autorisé)
-        for i in range(1, 26):
+        # Discord limite à 5 champs dans une modal
+        for i in range(1, 6):  # ← 1 à 5
             ti = discord.ui.TextInput(
                 label=f"Option {i}",
                 placeholder=f"Ex: Support technique",
-                required=(i == 1),  # la première est obligatoire
+                required=(i == 1),  # seule la première est obligatoire
                 max_length=100
             )
             self.add_item(ti)
@@ -1476,9 +1476,6 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
             val = ti.value.strip()
             if val:
                 opts.append(val)
-            if len(opts) >= 25:
-                break
-
         if not opts:
             await interaction.response.send_message("❌ Au moins une option est requise.", ephemeral=True)
             return
@@ -1562,7 +1559,7 @@ async def send_public_ticket_panel(interaction: discord.Interaction, sys_name: s
         description="Cliquez sur le bouton ci-dessous pour ouvrir un ticket." if mode == "basic"
                     else "Sélectionnez le type de ticket ci-dessous.",
         color=0x5865F2,
-        timestamp=datetime.now(datetime.timezone.utc)
+        timestamp=datetime.now(timezone.utc)
     )
     embed.set_footer(text="Seiko Security")
 
