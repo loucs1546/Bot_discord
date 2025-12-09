@@ -469,7 +469,7 @@ class AdvancedTicketSelect(discord.ui.Select):
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
             }
-            ticket_category = await guild.create_category(name="🎟・Tickets", overwrites=overwrites_cat)
+            ticket_category = await guild.create_category(name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪", overwrites=overwrites_cat)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -569,7 +569,7 @@ class BasicTicketView(discord.ui.View):
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
             }
-            ticket_category = await guild.create_category(name="🎟・Tickets", overwrites=overwrites_cat)
+            ticket_category = await guild.create_category(name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪", overwrites=overwrites_cat)
 
         # Permissions du salon
         overwrites = {
@@ -730,7 +730,7 @@ class TicketManagementView(discord.ui.View):
                         title=f"🗂️ Historique ticket - {self.ticket_channel.name}",
                         description=full_log,
                         color=0x5865F2,
-                        timestamp=datetime.now(discord.utils.UTC)
+                        timestamp=datetime.now(timezone.utc)  # ← CORRIGÉ
                     )
                     owner = confirm_interaction.guild.get_member(self.owner_id) if self.owner_id else None
                     if owner:
@@ -1692,7 +1692,7 @@ async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison:
         title="👢 Kick",
         description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
         color=0xff9900,
-        timestamp=datetime.now(discord.utils.UTC)
+        timestamp=datetime.now(timezone.utc)
     )
     ch = get_sanction_channel(bot)
     if ch: 
@@ -1723,7 +1723,7 @@ async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: i
         title="🔨 Ban",
         description=f"**Membre** : {pseudo.mention}\n**Modérateur** : {interaction.user.mention}\n**Raison** : {raison}",
         color=0xff0000,
-        timestamp=datetime.now(discord.utils.UTC)
+        timestamp=datetime.now(timezone.utc)
     )
     ch = get_sanction_channel(bot)
     if ch: 
@@ -1873,7 +1873,7 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
         )
         await interaction.followup.send(summary, ephemeral=True)
         try:
-            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.now(discord.utils.UTC))
+            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.now(timezone.utc))
             await send_log_to(bot, "commands", embed)
         except Exception:
             pass
