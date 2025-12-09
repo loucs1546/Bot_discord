@@ -282,7 +282,7 @@ class LogChannelSelectView(discord.ui.View):
         self.add_item(select)
 
 @bot.tree.command(name="rule-config", description="Configurer le règlement du serveur")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("rule_config")
 async def rule_config(interaction: discord.Interaction):
     class RuleModal(discord.ui.Modal, title="📝 Règlement du serveur"):
         content = discord.ui.TextInput(
@@ -321,7 +321,7 @@ class RuleAcceptView(discord.ui.View):
 
 @bot.tree.command(name="reach-id", description="Obtenir le pseudo à partir d'une ID utilisateur")
 @discord.app_commands.describe(user_id="ID de l'utilisateur")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("reach-id")
 async def reach_id(interaction: discord.Interaction, user_id: str):
     try:
         uid = int(user_id)
@@ -874,7 +874,7 @@ async def ping(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="start", description="Configurer complètement le bot pour ce serveur")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("start")
 async def start_config(interaction: discord.Interaction):
     await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
     guild = interaction.guild
@@ -1017,7 +1017,7 @@ async def remove_user(interaction: discord.Interaction, utilisateur: discord.Mem
     await interaction.response.send_message(f"✅ {utilisateur.mention} retiré de {channel.mention}.")
 
 @bot.tree.command(name="role-config", description="Configurer les rôles autorisés à utiliser certaines commandes")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("role_config")
 async def role_config(interaction: discord.Interaction):
     class RoleConfigModal(discord.ui.Modal, title="Configurer les permissions"):
         mod_role = discord.ui.TextInput(label="Rôle Modérateur", placeholder="Mentionnez ou ID", max_length=50)
@@ -1130,7 +1130,7 @@ class FinalSecurityConfigView(discord.ui.View):
         self.stop()
 
 @bot.tree.command(name="reset", description="Réinitialise TOUTES les données du bot pour ce serveur")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("reset")
 async def reset_config(interaction: discord.Interaction):
     config.CONFIG.clear()
     # Optionnel : supprimer le salon 📁-sauvegarde
@@ -1144,7 +1144,7 @@ async def reset_config(interaction: discord.Interaction):
     )
 
 @bot.tree.command(name="config", description="Modifier la configuration actuelle")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("config")
 async def configs(interaction: discord.Interaction):
     class ConfigMainView(discord.ui.View):
         @discord.ui.button(label="👥 Rôles & Salons", style=discord.ButtonStyle.primary, emoji="👥")
@@ -1314,7 +1314,7 @@ class SecurityConfigView(discord.ui.View):
     discord.app_commands.Choice(name="vocal", value="vocal"),
     discord.app_commands.Choice(name="securite", value="securite")
 ])
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("logs")
 async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.TextChannel):
     config.CONFIG.setdefault("logs", {})[type] = salon.id
     embed = discord.Embed(
@@ -1326,7 +1326,7 @@ async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.T
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="scan-deleted", description="Récupère les suppressions récentes manquées")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("scan-deleted")
 async def scan_deleted(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     count = 0
@@ -1344,7 +1344,7 @@ async def scan_deleted(interaction: discord.Interaction):
     await interaction.followup.send(f"✅ {count} suppressions récupérées.", ephemeral=True)
 
 @bot.tree.command(name="add-cat-log", description="Crée une catégorie complète de salons de surveillance")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("add-cat-log")
 async def add_cat_log(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
@@ -1413,7 +1413,7 @@ async def add_cat_log(interaction: discord.Interaction):
     nom="Nom du salon",
     categorie="Catégorie où créer le salon"
 )
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("create-salon")
 async def create_salon(interaction: discord.Interaction, nom: str, categorie: discord.CategoryChannel):
     await interaction.response.defer(ephemeral=True)
     
@@ -1425,6 +1425,31 @@ async def create_salon(interaction: discord.Interaction, nom: str, categorie: di
         )
     except Exception as e:
         await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
+
+def check_role_permissions(command_name: str):
+    async def predicate(interaction: discord.Interaction) -> bool:
+        # Admins toujours autorisés
+        if interaction.user.guild_permissions.administrator:
+            return True
+
+        # Rôles définis dans la config
+        allowed_roles = config.CONFIG.get("role_permissions", {})
+        user_role_ids = {role.id for role in interaction.user.roles}
+
+        # Vérifie chaque rôle : si l’un d’eux autorise la commande → OK
+        for role_key in allowed_roles:
+            role_id = config.CONFIG.get("roles", {}).get(role_key)
+            if role_id and role_id in user_role_ids:
+                if allowed_roles[role_key].get(command_name, False):
+                    return True
+
+        # Refus : envoyer un message clair
+        await interaction.response.send_message(
+            "❌ Vous n’avez pas la permission d’utiliser cette commande.", 
+            ephemeral=True
+        )
+        return False
+    return discord.app_commands.check(predicate)
 
 
 # ============================
@@ -1466,7 +1491,7 @@ async def delete_categorie(interaction: discord.Interaction, categorie: discord.
 # ============================
 
 @bot.tree.command(name="ticket-config", description="Configurer le système de tickets")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("ticket-config")
 async def ticket_config(interaction: discord.Interaction):
     """Configurer plusieurs systèmes de tickets"""
     await interaction.response.defer(ephemeral=True)
@@ -1583,7 +1608,7 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
             pass
 
 @bot.tree.command(name="ticket-panel", description="Envoie un panneau public de création de ticket")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("icket-panel")
 async def ticket_panel(interaction: discord.Interaction):
     systems = config.CONFIG.get("ticket_systems", {})
     if not systems:
@@ -1754,7 +1779,7 @@ class RolePermConfigView(discord.ui.View):
 # ============================
 
 @bot.tree.command(name="role-perms", description="Configurer les permissions par rôle")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("role-perms")
 async def role_perms(interaction: discord.Interaction):
     class RolePermMainView(discord.ui.View):
         @discord.ui.button(label="Rôle par défaut", style=discord.ButtonStyle.secondary)
@@ -1864,19 +1889,19 @@ async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison:
     await interaction.response.send_message(f"✅ Avertissement envoyé.", ephemeral=True)
 
 @bot.tree.command(name="anti-spam", description="Active/désactive l'anti-spam")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("anti-spam")
 async def anti_spam(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_spam"] = actif
     await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
 @bot.tree.command(name="anti-raid", description="Active/désactive l'anti-raid")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("anti-raid")
 async def anti_raid(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_raid"] = actif
     await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
 @bot.tree.command(name="anti-hack", description="Active/désactive l'anti-hack")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("anti-hack")
 async def anti_hack(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_hack"] = actif
     await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=True)
@@ -1884,7 +1909,7 @@ async def anti_hack(interaction: discord.Interaction, actif: bool):
 
 # Commande utilitaire pour forcer la synchronisation des commandes sur le serveur courant
 @bot.tree.command(name="sync", description="(Admin) Synchronise les commandes pour ce serveur")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("sync")
 async def sync_commands(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
@@ -1907,7 +1932,7 @@ async def sync_commands(interaction: discord.Interaction):
 
 @bot.tree.command(name="load-save", description="Charge TOUTE la configuration depuis un salon")
 @discord.app_commands.describe(salon="Salon contenant la sauvegarde")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("load-save")
 async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
     await interaction.response.defer(ephemeral=True)
     loaded = None

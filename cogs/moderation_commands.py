@@ -29,19 +29,19 @@ class ModerationCommandsCog(commands.Cog):
         self.bot = bot
 
     @discord.app_commands.command(name="anti-spam", description="Active/désactive l'anti-spam")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("anti_spam")
     async def anti_spam(self, interaction: discord.Interaction, actif: bool):
         config.CONFIG["security"]["anti_spam"] = actif
         await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
     @discord.app_commands.command(name="anti-raid", description="Active/désactive l'anti-raid")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("anti_raid")
     async def anti_raid(self, interaction: discord.Interaction, actif: bool):
         config.CONFIG["security"]["anti_raid"] = actif
         await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
     @discord.app_commands.command(name="anti-hack", description="Active/désactive l'anti-hack")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("anti_hack")
     async def anti_hack(self, interaction: discord.Interaction, actif: bool):
         config.CONFIG["security"]["anti_hack"] = actif
         await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=True)
@@ -183,7 +183,7 @@ class ModerationCommandsCog(commands.Cog):
         await interaction.response.send_message(f"✅ Avertissement envoyé.", ephemeral=True)
 
     @discord.app_commands.command(name="reachlog", description="Affiche le dernier log d'audit")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("reachlog")
     async def reachlog(self, interaction: discord.Interaction):
         try:
             async for entry in interaction.guild.audit_logs(limit=1):
@@ -199,7 +199,7 @@ class ModerationCommandsCog(commands.Cog):
 
     @discord.app_commands.command(name="reach-id", description="Résout un ID Discord (utilisateur, salon, rôle)")
     @discord.app_commands.describe(id="ID à résoudre")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("reach_id")
     async def reach_id(self, interaction: discord.Interaction, id: str):
         try:
             obj_id = int(id)
@@ -236,42 +236,42 @@ class ModerationCommandsCog(commands.Cog):
 
     @discord.app_commands.command(name="logs-messages", description="Affiche les messages d'un utilisateur")
     @discord.app_commands.describe(user="Utilisateur à filtrer", salon="Salon où envoyer les logs")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("logs_messages")
     async def logs_messages(self, interaction: discord.Interaction, user: discord.Member, salon: discord.TextChannel):
         # Cette commande nécessite un stockage des messages (à implémenter)
         await interaction.response.send_message("ℹ️ Commande en développement.", ephemeral=True)
 
     @discord.app_commands.command(name="logs-moderation", description="Affiche les actions de modération d'un utilisateur")
     @discord.app_commands.describe(user="Utilisateur à filtrer")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("logs_moderation")
     async def logs_moderation(self, interaction: discord.Interaction, user: discord.Member):
         # Cette commande nécessite un stockage des logs d'audit (à implémenter)
         await interaction.response.send_message("ℹ️ Commande en développement.", ephemeral=True)
 
     @discord.app_commands.command(name="logs-ticket", description="Affiche les logs de ticket d'un utilisateur")
     @discord.app_commands.describe(user="Utilisateur à filtrer")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("logs_ticket")
     async def logs_ticket(self, interaction: discord.Interaction, user: discord.Member):
         # À lier avec l'autre bot (via écoute des messages)
         await interaction.response.send_message("ℹ️ Commande en développement.", ephemeral=True)
 
     @discord.app_commands.command(name="logs-vocal", description="Affiche les activités vocales d'un utilisateur")
     @discord.app_commands.describe(user="Utilisateur à filtrer")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("logs_vocal")
     async def logs_vocal(self, interaction: discord.Interaction, user: discord.Member):
         # À implémenter via on_voice_state_update
         await interaction.response.send_message("ℹ️ Commande en développement.", ephemeral=True)
 
     @discord.app_commands.command(name="logs-giveaway", description="Affiche les giveaways créés par un utilisateur")
     @discord.app_commands.describe(user="Utilisateur à filtrer")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("logs_giveaway")
     async def logs_giveaway(self, interaction: discord.Interaction, user: discord.Member):
         # À lier avec l'autre bot (via écoute des messages)
         await interaction.response.send_message("ℹ️ Commande en développement.", ephemeral=True)
 
     @discord.app_commands.command(name="logs-securite", description="Affiche les alertes de sécurité d'un utilisateur")
     @discord.app_commands.describe(user="Utilisateur à filtrer")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("logs_securite")
     async def logs_securite(self, interaction: discord.Interaction, user: discord.Member):
         # À implémenter via les logs de sécurité
         await interaction.response.send_message("ℹ️ Commande en développement.", ephemeral=True)

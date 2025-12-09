@@ -5,7 +5,8 @@ WHITELISTED_PHRASES = {
     "...", "att", "f", "nan", "?", "quoi", "quoi xd", "woaaaaaaaaaaaaaaaa",
     "ddddd", "ok", "oui", "non", "stp", "s'il te plaît", "merci", "hello",
     "salut", "bonjour", "aide", "help", "hein", "wtf", "lol", "mdr", "ah",
-    "ouais", "ouai", "bah", "ben", "euh", "hm", "hmm", "bon", "allez"
+    "ouais", "ouai", "bah", "ben", "euh", "hm", "hmm", "bon", "allez", "XD",
+    "xD", "xd"
 }
 
 # === MOTS INTERDITS (à compléter avec ta liste) ===

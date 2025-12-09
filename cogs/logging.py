@@ -261,8 +261,10 @@ class LoggingCog(commands.Cog):
         reason = args.get("raison", "")
 
         # === LOG DES SANCTIONS SANS RAISON (dans 'bavures') ===
-        if interaction.command.name in ("kick", "ban", "warn") and (not reason or reason == "Aucune raison"):
-            embed = discord.Embed(
+        if interaction.command is None:
+            return  # Ignore les interactions avec des commandes inconnues
+        if interaction.command and interaction.command.name in ("kick", "ban", "warn"):
+                embed = discord.Embed(
                 title="⚠️ Bavure détectée",
                 description=f"**Commande** : {full_command}\n**Auteur** : {interaction.user.mention}\n**Cible** : {args.get('pseudo', 'Inconnu')}\n**Raison** : *Aucune*",
                 color=0xff6600,

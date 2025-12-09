@@ -7,7 +7,7 @@ class ConfigCog(commands.Cog):
         self.bot = bot
 
     @discord.app_commands.command(name="config", description="Configure le bot")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("config")
     async def config(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="⚙️ Configuration de Seiko",

@@ -81,14 +81,14 @@ class LogSetupCog(commands.Cog):
             await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
 
     @discord.app_commands.command(name="add-cat-log", description="Crée une catégorie complète de salons de surveillance")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("add_cat_log")
     async def add_cat_log(self, interaction: discord.Interaction):
         # Utilise la méthode réutilisable
         await self._create_category(interaction)
 
     @discord.app_commands.command(name="create-categorie", description="Crée une catégorie personnalisée")
     @discord.app_commands.describe(nom="Nom de la catégorie")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("create_categorie")
     async def create_categorie(self, interaction: discord.Interaction, nom: str):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
@@ -111,7 +111,7 @@ class LogSetupCog(commands.Cog):
         nom="Nom du salon",
         categorie="Catégorie où créer le salon"
     )
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @check_role_permissions("ceate_salon")
     async def create_salon(self, interaction: discord.Interaction, nom: str, categorie: discord.CategoryChannel):
         await interaction.response.defer(ephemeral=True)
         
