@@ -63,23 +63,20 @@ from datetime import datetime, timezone
 
 def check_role_permissions(command_name: str):
     async def predicate(interaction: discord.Interaction) -> bool:
-        # Admins toujours autorisés
+        # Admins always allowed
         if interaction.user.guild_permissions.administrator:
             return True
-
-        # Vérifier les rôles définis dans la config
-        allowed_roles = config.CONFIG.get("role_permissions", {})
+        # Vérifier les rôles définis
+        role_perms = config.CONFIG.get("role_permissions", {})
         user_role_ids = {role.id for role in interaction.user.roles}
-
-        for role_key in allowed_roles:
+        for role_key in role_perms:
             role_id = config.CONFIG.get("roles", {}).get(role_key)
             if role_id and role_id in user_role_ids:
-                if allowed_roles[role_key].get(command_name, False):
+                if role_perms[role_key].get(command_name, False):
                     return True
-
-        # Refus → message clair
+        # Refus
         await interaction.response.send_message(
-            "❌ Vous n’avez pas la permission d’utiliser cette commande.", 
+            "❌ Vous n’avez pas la permission d’utiliser cette commande.",
             ephemeral=True
         )
         return False
@@ -346,7 +343,7 @@ class RuleAcceptView(discord.ui.View):
 
 @bot.tree.command(name="reach-id", description="Obtenir le pseudo à partir d'une ID utilisateur")
 @discord.app_commands.describe(user_id="ID de l'utilisateur")
-@check_role_permissions("nom")
+@check_role_permissions("reach-id")
 async def reach_id(interaction: discord.Interaction, user_id: str):
     try:
         uid = int(user_id)
@@ -1460,7 +1457,6 @@ async def create_salon(interaction: discord.Interaction, nom: str, categorie: di
 
 @bot.tree.command(name="clear-salon", description="Supprime tous les messages du salon")
 @check_role_permissions("clear-salon")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
 async def clear_salon(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=1000)
@@ -1468,7 +1464,6 @@ async def clear_salon(interaction: discord.Interaction):
 
 @bot.tree.command(name="delete-salon", description="Supprime un salon")
 @check_role_permissions("delete-salon")
-@discord.app_commands.checks.has_permissions(manage_channels=True)
 async def delete_salon(interaction: discord.Interaction, salon: discord.TextChannel):
     name = salon.name
     await salon.delete(reason=f"Supprimé par {interaction.user}")
@@ -1871,7 +1866,6 @@ async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: i
 @bot.tree.command(name="warn", description="Avertit un membre")
 @check_role_permissions("warn")
 @discord.app_commands.describe(pseudo="Membre à avertir", raison="Raison de l'avertissement")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
 async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison: str = "Aucune raison"):
     if est_bavure_raison(raison):
         embed = discord.Embed(
