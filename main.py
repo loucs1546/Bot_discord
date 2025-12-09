@@ -458,18 +458,17 @@ class AdvancedTicketSelect(discord.ui.Select):
         clean_name = clean_name[:20]
         ticket_name = f"{clean_name}-{str(counter).zfill(4)}"
 
-        # === CRÉER / DÉTECTER LA CATÉGORIE TICKETS ===
-        ticket_category = None
-        for cat in guild.categories:
-            if "ticket" in cat.name.lower() or "support" in cat.name.lower():
-                ticket_category = cat
-                break
+        # === CRÉER / DÉTECTER LA CATÉGORIE TICKETS EXACTE ===
+        ticket_category = discord.utils.get(guild.categories, name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪")
         if not ticket_category:
             overwrites_cat = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
             }
-            ticket_category = await guild.create_category(name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪", overwrites=overwrites_cat)
+            ticket_category = await guild.create_category(
+                name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪",
+                overwrites=overwrites_cat
+            )
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -558,18 +557,17 @@ class BasicTicketView(discord.ui.View):
         clean_name = clean_name[:20]  # Limiter à 20 caractères
         ticket_name = f"{clean_name}-{str(counter).zfill(4)}"
 
-        # === CRÉER / DÉTECTER LA CATÉGORIE TICKETS ===
-        ticket_category = None
-        for cat in guild.categories:
-            if "ticket" in cat.name.lower() or "support" in cat.name.lower():
-                ticket_category = cat
-                break
+        # === CRÉER / DÉTECTER LA CATÉGORIE TICKETS EXACTE ===
+        ticket_category = discord.utils.get(guild.categories, name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪")
         if not ticket_category:
             overwrites_cat = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
             }
-            ticket_category = await guild.create_category(name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪", overwrites=overwrites_cat)
+            ticket_category = await guild.create_category(
+                name="𓆩𖤍𓆪۰⟣ TICKETS ⟢۰𓆩𖤍𓆪",
+                overwrites=overwrites_cat
+            )
 
         # Permissions du salon
         overwrites = {
@@ -625,13 +623,11 @@ class TicketManagementView(discord.ui.View):
         super().__init__(timeout=None)
         self.owner_id = owner_id
         self.ticket_num = ticket_num
-        self.is_closed = False
-    
-    @discord.ui.button(label="👤 Claim", style=discord.ButtonStyle.primary, emoji="✋", custom_id="ticket_claim")
+
+    @discord.ui.button(label="👤 Claim", style=discord.ButtonStyle.primary, emoji="✋")
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Claim = Clear tous les messages sauf le premier du bot"""
-        if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
-            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
+        if not has_ticket_permissions(interaction.user):
+            await interaction.response.send_message("❌ Vous n’avez pas la permission.", ephemeral=True)
             return
         
         await interaction.response.defer()
@@ -746,6 +742,16 @@ class TicketManagementView(discord.ui.View):
 
         await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=True)
 
+def has_ticket_permissions(user: discord.Member) -> bool:
+    allowed_ids = []
+    for key in ("support", "moderator", "admin", "founder"):
+        rid = config.CONFIG.get("roles", {}).get(key)
+        if rid:
+            allowed_ids.append(rid)
+    return (
+        user.guild_permissions.administrator or
+        any(r.id in allowed_ids for r in user.roles)
+    )
 
 # TicketControls est maintenant un alias pour TicketManagementView (compatibilité)
 class TicketControls(TicketManagementView):
@@ -991,42 +997,52 @@ async def start_config(interaction: discord.Interaction):
         "🎟️ Pour configurer des systèmes de tickets avancés, utilisez `/ticket-config`."
     )
 
-@bot.tree.command(name="add-user", description="Ajoute un utilisateur au ticket")
-@discord.app_commands.describe(utilisateur="Utilisateur à ajouter")
-async def add_user(interaction: discord.Interaction, utilisateur: discord.Member):
-    channel = interaction.channel
-    # Vérifier si on est dans un ticket
-    if not (
-        channel.name.startswith(("ticket-", "ticket_")) or 
-        (channel.category and "ticket" in channel.category.name.lower())
-    ):
-        await interaction.response.send_message("❌ Cette commande ne fonctionne que dans un salon de ticket.", ephemeral=True)
-        return
-
-    # Ajouter les permissions
+@bot.tree.command(name="add-user", description="Ajoute un utilisateur à un salon (ticket ou autre)")
+@discord.app_commands.describe(utilisateur="Utilisateur à ajouter", salon="Salon (optionnel, par défaut : ici)")
+async def add_user(interaction: discord.Interaction, utilisateur: discord.Member, salon: discord.TextChannel = None):
+    channel = salon or interaction.channel
     await channel.set_permissions(
         utilisateur,
         read_messages=True,
         send_messages=True,
-        attach_files=False,
-        embed_links=False
+        attach_files=False
     )
-    await interaction.response.send_message(f"✅ {utilisateur.mention} a été ajouté au ticket.")
+    await interaction.response.send_message(f"✅ {utilisateur.mention} ajouté à {channel.mention}.")
 
-@bot.tree.command(name="remove-user", description="Retire un utilisateur du ticket")
-@discord.app_commands.describe(utilisateur="Utilisateur à retirer")
-async def remove_user(interaction: discord.Interaction, utilisateur: discord.Member):
-    channel = interaction.channel
-    if not (
-        channel.name.startswith(("ticket-", "ticket_")) or 
-        (channel.category and "ticket" in channel.category.name.lower())
-    ):
-        await interaction.response.send_message("❌ Cette commande ne fonctionne que dans un salon de ticket.", ephemeral=True)
-        return
-
-    # Retirer les permissions
+@bot.tree.command(name="remove-user", description="Retire un utilisateur d'un salon")
+@discord.app_commands.describe(utilisateur="Utilisateur à retirer", salon="Salon (optionnel, par défaut : ici)")
+async def remove_user(interaction: discord.Interaction, utilisateur: discord.Member, salon: discord.TextChannel = None):
+    channel = salon or interaction.channel
     await channel.set_permissions(utilisateur, overwrite=None)
-    await interaction.response.send_message(f"✅ {utilisateur.mention} a été retiré du ticket.")
+    await interaction.response.send_message(f"✅ {utilisateur.mention} retiré de {channel.mention}.")
+
+@bot.tree.command(name="role-config", description="Configurer les rôles autorisés à utiliser certaines commandes")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def role_config(interaction: discord.Interaction):
+    class RoleConfigModal(discord.ui.Modal, title="Configurer les permissions"):
+        mod_role = discord.ui.TextInput(label="Rôle Modérateur", placeholder="Mentionnez ou ID", max_length=50)
+        support_role = discord.ui.TextInput(label="Rôle Support", placeholder="Mentionnez ou ID", max_length=50)
+        async def on_submit(self, i: discord.Interaction):
+            try:
+                mod_id = int(self.mod_role.value.strip("<@&>"))
+                support_id = int(self.support_role.value.strip("<@&>"))
+                config.CONFIG.setdefault("allowed_roles", {})["moderator"] = mod_id
+                config.CONFIG["allowed_roles"]["support"] = support_id
+                await i.response.send_message("✅ Rôles configurés pour les commandes restreintes.", ephemeral=True)
+                await save_guild_config(i.guild, config.CONFIG)
+            except ValueError:
+                await i.response.send_message("❌ ID ou mention invalide.", ephemeral=True)
+    await interaction.response.send_modal(RoleConfigModal())
+
+def has_restricted_role(interaction: discord.Interaction) -> bool:
+    allowed = config.CONFIG.get("allowed_roles", {})
+    user_roles = {r.id for r in interaction.user.roles}
+    return (
+        interaction.user.guild_permissions.administrator or
+        allowed.get("moderator") in user_roles or
+        allowed.get("support") in user_roles or
+        interaction.user.id == interaction.guild.owner_id
+    )
 
 # === VIEWS POUR /start ===
 class LogCreationChoiceView(discord.ui.View):
@@ -1423,11 +1439,11 @@ async def clear_salon(interaction: discord.Interaction):
     await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=True)
 
 @bot.tree.command(name="delete-salon", description="Supprime un salon")
-@discord.app_commands.describe(salon="Salon à supprimer")
 @discord.app_commands.checks.has_permissions(manage_channels=True)
 async def delete_salon(interaction: discord.Interaction, salon: discord.TextChannel):
+    name = salon.name
     await salon.delete(reason=f"Supprimé par {interaction.user}")
-    await interaction.response.send_message(f"✅ Salon **{salon.name}** supprimé.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Salon **{name}** supprimé.", ephemeral=True)
 
 @bot.tree.command(name="delete-categorie", description="Supprime une catégorie et ses salons")
 @discord.app_commands.describe(categorie="Catégorie à supprimer")

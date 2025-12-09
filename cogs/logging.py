@@ -99,39 +99,27 @@ class LoggingCog(commands.Cog):
             await send_log_to(self.bot, "securite", embed)
 
     @commands.Cog.listener()
-    async def on_member_update(self, before, after):
-        if before.guild.id != config.GUILD_ID:
-            return
-
-        # === PSEUDO MODIFIÉ (CORRIGÉ) ===
-        if before.nick != after.nick:
-            moderator = None
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if before.nick != after.nick or before.name != after.name:
+            # Récupérer l'action dans les logs d'audit
+            guild = after.guild
             try:
-                async for entry in after.guild.audit_logs(limit=5, action=discord.AuditLogAction.member_update):
-                    if (
-                        entry.target.id == after.id and
-                        hasattr(entry.changes, 'nick') and
-                        entry.changes.nick[0] == before.nick and
-                        entry.changes.nick[1] == after.nick and
-                        (discord.utils.utcnow() - entry.created_at).total_seconds() < 10
-                    ):
-                        moderator = entry.user
+                async for entry in guild.audit_logs(action=discord.AuditLogAction.member_update, limit=5):
+                    if entry.target.id == after.id and (entry.before.nick != entry.after.nick or entry.before.name != entry.after.name):
+                        changer = entry.user  # ← C'est celui qui a modifié
                         break
-            except Exception:
-                pass
+                else:
+                    changer = after  # Si non trouvé, c'est l'utilisateur lui-même
+            except:
+                changer = after
 
-            # ✅ Récupère le vrai nom (pas "Aucun")
-            old_nick = before.nick or before.global_name or before.name
-            new_nick = after.nick or after.global_name or after.name
-
-            # Si on ne trouve pas le modérateur via audit logs, afficher le pseudo de la personne concernée
-            fait_par = moderator.mention if moderator else after.display_name
             embed = discord.Embed(
-                title="📛 Pseudo modifié",
-                description=f"{after.mention}\n**Avant** : {old_nick}\n**Après** : {new_nick}\n**Fait par** : {fait_par}",
-                color=0x00ccff,
-                timestamp=discord.utils.utcnow()
+                title="✏️ Pseudo modifié",
+                description=f"**Utilisateur** : {after.mention}\n**Ancien** : `{before.display_name}`\n**Nouveau** : `{after.display_name}`\n**Modifié par** : {changer.mention}",
+                color=0x3498db,
+                timestamp=datetime.now(timezone.utc)
             )
+            embed.set_thumbnail(url=after.display_avatar.url)
             await send_log_to(self.bot, "profile", embed)
 
         # === RÔLES ===
@@ -294,6 +282,32 @@ class LoggingCog(commands.Cog):
             timestamp=discord.utils.utcnow()
         )
         await send_log_to(self.bot, "commands", embed)
+    
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        welcome_ch = self.bot.get_channel(config.CONFIG.get("channels", {}).get("welcome"))
+        if welcome_ch:
+            embed = discord.Embed(
+                title="👋 Bienvenue sur le serveur !",
+                description=f"Bonjour {member.mention},\nBienvenue sur **{member.guild.name}** !\n\nLis le règlement et amuse-toi bien !",
+                color=0x2ecc71,
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await welcome_ch.send(embed=embed)
+    
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        leave_ch = self.bot.get_channel(config.CONFIG.get("channels", {}).get("leave"))
+        if leave_ch:
+            embed = discord.Embed(
+                title="👋 Au revoir...",
+                description=f"**{member}** a quitté le serveur.\nNous espérons te revoir bientôt !",
+                color=0xe74c3c,
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await leave_ch.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(LoggingCog(bot))
