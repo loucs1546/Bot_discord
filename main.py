@@ -59,14 +59,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 cogs_loaded = False
 
 # === HELPERS ===
-from datetime import datetime, timezone
-
 def check_role_permissions(command_name: str):
     async def predicate(interaction: discord.Interaction) -> bool:
         # Admins always allowed
         if interaction.user.guild_permissions.administrator:
             return True
-        # Vérifier les rôles définis
+        # Check custom roles
         role_perms = config.CONFIG.get("role_permissions", {})
         user_role_ids = {role.id for role in interaction.user.roles}
         for role_key in role_perms:
@@ -74,7 +72,7 @@ def check_role_permissions(command_name: str):
             if role_id and role_id in user_role_ids:
                 if role_perms[role_key].get(command_name, False):
                     return True
-        # Refus
+        # Refuse
         await interaction.response.send_message(
             "❌ Vous n’avez pas la permission d’utiliser cette commande.",
             ephemeral=True
@@ -342,8 +340,7 @@ class RuleAcceptView(discord.ui.View):
         await interaction.response.send_message("✅ Bienvenue sur le serveur !", ephemeral=True)
 
 @bot.tree.command(name="reach-id", description="Obtenir le pseudo à partir d'une ID utilisateur")
-@discord.app_commands.describe(user_id="ID de l'utilisateur")
-@check_role_permissions("reach-id")
+@check_role_permissions("reach-id")  # ← ton système custom
 async def reach_id(interaction: discord.Interaction, user_id: str):
     try:
         uid = int(user_id)
