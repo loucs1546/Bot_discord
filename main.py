@@ -1680,26 +1680,46 @@ class TicketPanelButton(discord.ui.Button):
         )
 
 class RolePermConfigView(discord.ui.View):
-    def __init__(self, role_key: str):
+    def __init__(self, role_key: str, page: int = 0):
         super().__init__(timeout=600)
         self.role_key = role_key
+        self.page = page
         self.permissions = config.CONFIG.setdefault("role_permissions", {}).setdefault(role_key, {})
         self.all_commands = [cmd.name for cmd in bot.tree.get_commands() if not cmd.parent]
+        self.commands_per_page = 20  # ← Maximum sûr (5 lignes x 4 boutons)
         self.update_buttons()
 
     def update_buttons(self):
         self.clear_items()
-        for cmd in self.all_commands:
+        start = self.page * self.commands_per_page
+        end = start + self.commands_per_page
+        page_commands = self.all_commands[start:end]
+
+        for cmd in page_commands:
             enabled = self.permissions.get(cmd, False)
             btn = discord.ui.Button(
-                label=cmd,
-                style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
+                label=cmd[:80],  # Limite Discord = 80 caractères
+                style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
+                row=min(len(self.children) // 5, 4)  # Forcer max 5 par ligne
             )
             btn.callback = self.make_callback(cmd)
             self.add_item(btn)
-        finish = discord.ui.Button(label="✅ Valider", style=discord.ButtonStyle.green)
-        finish.callback = self.finish
-        self.add_item(finish)
+
+        # Boutons de navigation
+        if self.page > 0:
+            prev_btn = discord.ui.Button(label="⬅️ Précédent", style=discord.ButtonStyle.secondary, row=4)
+            prev_btn.callback = self.go_prev
+            self.add_item(prev_btn)
+
+        if end < len(self.all_commands):
+            next_btn = discord.ui.Button(label="Suivant ➡️", style=discord.ButtonStyle.secondary, row=4)
+            next_btn.callback = self.go_next
+            self.add_item(next_btn)
+
+        # Bouton Valider
+        finish_btn = discord.ui.Button(label="✅ Valider", style=discord.ButtonStyle.green, row=4)
+        finish_btn.callback = self.finish
+        self.add_item(finish_btn)
 
     def make_callback(self, cmd_name):
         async def callback(interaction: discord.Interaction):
@@ -1707,6 +1727,16 @@ class RolePermConfigView(discord.ui.View):
             self.update_buttons()
             await interaction.response.edit_message(view=self)
         return callback
+
+    async def go_prev(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(view=self)
+
+    async def go_next(self, interaction: discord.Interaction):
+        self.page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(view=self)
 
     async def finish(self, interaction: discord.Interaction):
         # Sauvegarde
