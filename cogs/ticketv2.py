@@ -193,7 +193,7 @@ class TicketsCog(commands.Cog):
         self.bot = bot
 
     @discord.app_commands.command(name="ticket-panel", description="Envoie le panneau de création de ticket")
-    @check_role_permissions("ticket_panel")
+    @discord.app_commands.checks.has_permissions(administrator=True)
     async def ticket_panel(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="🎟️ Support - Créer un ticket",

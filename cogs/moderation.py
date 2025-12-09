@@ -22,21 +22,21 @@ class ModerationCog(commands.Cog):
         return self.settings[guild_id]
 
     @discord.app_commands.command(name="anti-spam", description="Active/désactive l'anti-spam")
-    @check_role_permissions("anti_spam")
+    @discord.app_commands.checks.has_permissions(administrator=True)
     async def anti_spam(self, interaction: discord.Interaction, actif: bool):
         settings = self.get_settings(interaction.guild.id)
         settings["anti_spam"] = actif
         await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
     @discord.app_commands.command(name="anti-raid", description="Active/désactive l'anti-raid")
-    @check_role_permissions("anti_raid")
+    @discord.app_commands.checks.has_permissions(administrator=True)
     async def anti_raid(self, interaction: discord.Interaction, actif: bool):
         settings = self.get_settings(interaction.guild.id)
         settings["anti_raid"] = actif
         await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
     @discord.app_commands.command(name="anti-hack", description="Active/désactive l'anti-hack")
-    @check_role_permissions("anti_hack")
+    @discord.app_commands.checks.has_permissions(administrator=True)
     async def anti_hack(self, interaction: discord.Interaction, actif: bool):
         settings = self.get_settings(interaction.guild.id)
         settings["anti_hack"] = actif

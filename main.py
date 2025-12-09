@@ -59,6 +59,31 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 cogs_loaded = False
 
 # === HELPERS ===
+from datetime import datetime, timezone
+
+def check_role_permissions(command_name: str):
+    async def predicate(interaction: discord.Interaction) -> bool:
+        # Admins toujours autorisés
+        if interaction.user.guild_permissions.administrator:
+            return True
+
+        # Vérifier les rôles définis dans la config
+        allowed_roles = config.CONFIG.get("role_permissions", {})
+        user_role_ids = {role.id for role in interaction.user.roles}
+
+        for role_key in allowed_roles:
+            role_id = config.CONFIG.get("roles", {}).get(role_key)
+            if role_id and role_id in user_role_ids:
+                if allowed_roles[role_key].get(command_name, False):
+                    return True
+
+        # Refus → message clair
+        await interaction.response.send_message(
+            "❌ Vous n’avez pas la permission d’utiliser cette commande.", 
+            ephemeral=True
+        )
+        return False
+    return discord.app_commands.check(predicate)
 
 # === UTILITAIRES TICKETS POUR /start ===
 class ContinueOptionView(discord.ui.View):
@@ -282,7 +307,7 @@ class LogChannelSelectView(discord.ui.View):
         self.add_item(select)
 
 @bot.tree.command(name="rule-config", description="Configurer le règlement du serveur")
-@check_role_permissions("rule_config")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def rule_config(interaction: discord.Interaction):
     class RuleModal(discord.ui.Modal, title="📝 Règlement du serveur"):
         content = discord.ui.TextInput(
@@ -321,7 +346,7 @@ class RuleAcceptView(discord.ui.View):
 
 @bot.tree.command(name="reach-id", description="Obtenir le pseudo à partir d'une ID utilisateur")
 @discord.app_commands.describe(user_id="ID de l'utilisateur")
-@check_role_permissions("reach-id")
+@check_role_permissions("nom")
 async def reach_id(interaction: discord.Interaction, user_id: str):
     try:
         uid = int(user_id)
@@ -863,6 +888,7 @@ async def self_ping_loop():
 # ============================
 
 @bot.tree.command(name="ping", description="Affiche la latence du bot")
+@check_role_permissions("ping")
 async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(f"🏓 Pong ! Latence : **{latency} ms**", ephemeral=True)
@@ -874,7 +900,7 @@ async def ping(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="start", description="Configurer complètement le bot pour ce serveur")
-@check_role_permissions("start")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def start_config(interaction: discord.Interaction):
     await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
     guild = interaction.guild
@@ -998,6 +1024,7 @@ async def start_config(interaction: discord.Interaction):
     )
 
 @bot.tree.command(name="add-user", description="Ajoute un utilisateur à un salon (ticket ou autre)")
+@check_role_permissions("add-user")
 @discord.app_commands.describe(utilisateur="Utilisateur à ajouter", salon="Salon (optionnel, par défaut : ici)")
 async def add_user(interaction: discord.Interaction, utilisateur: discord.Member, salon: discord.TextChannel = None):
     channel = salon or interaction.channel
@@ -1017,7 +1044,7 @@ async def remove_user(interaction: discord.Interaction, utilisateur: discord.Mem
     await interaction.response.send_message(f"✅ {utilisateur.mention} retiré de {channel.mention}.")
 
 @bot.tree.command(name="role-config", description="Configurer les rôles autorisés à utiliser certaines commandes")
-@check_role_permissions("role_config")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def role_config(interaction: discord.Interaction):
     class RoleConfigModal(discord.ui.Modal, title="Configurer les permissions"):
         mod_role = discord.ui.TextInput(label="Rôle Modérateur", placeholder="Mentionnez ou ID", max_length=50)
@@ -1130,7 +1157,7 @@ class FinalSecurityConfigView(discord.ui.View):
         self.stop()
 
 @bot.tree.command(name="reset", description="Réinitialise TOUTES les données du bot pour ce serveur")
-@check_role_permissions("reset")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def reset_config(interaction: discord.Interaction):
     config.CONFIG.clear()
     # Optionnel : supprimer le salon 📁-sauvegarde
@@ -1144,7 +1171,7 @@ async def reset_config(interaction: discord.Interaction):
     )
 
 @bot.tree.command(name="config", description="Modifier la configuration actuelle")
-@check_role_permissions("config")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def configs(interaction: discord.Interaction):
     class ConfigMainView(discord.ui.View):
         @discord.ui.button(label="👥 Rôles & Salons", style=discord.ButtonStyle.primary, emoji="👥")
@@ -1314,7 +1341,7 @@ class SecurityConfigView(discord.ui.View):
     discord.app_commands.Choice(name="vocal", value="vocal"),
     discord.app_commands.Choice(name="securite", value="securite")
 ])
-@check_role_permissions("logs")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.TextChannel):
     config.CONFIG.setdefault("logs", {})[type] = salon.id
     embed = discord.Embed(
@@ -1326,7 +1353,7 @@ async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.T
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="scan-deleted", description="Récupère les suppressions récentes manquées")
-@check_role_permissions("scan-deleted")
+@check_role_permissions("nom")
 async def scan_deleted(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     count = 0
@@ -1344,7 +1371,7 @@ async def scan_deleted(interaction: discord.Interaction):
     await interaction.followup.send(f"✅ {count} suppressions récupérées.", ephemeral=True)
 
 @bot.tree.command(name="add-cat-log", description="Crée une catégorie complète de salons de surveillance")
-@check_role_permissions("add-cat-log")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def add_cat_log(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
@@ -1413,7 +1440,7 @@ async def add_cat_log(interaction: discord.Interaction):
     nom="Nom du salon",
     categorie="Catégorie où créer le salon"
 )
-@check_role_permissions("create-salon")
+@check_role_permissions("nom")
 async def create_salon(interaction: discord.Interaction, nom: str, categorie: discord.CategoryChannel):
     await interaction.response.defer(ephemeral=True)
     
@@ -1426,37 +1453,13 @@ async def create_salon(interaction: discord.Interaction, nom: str, categorie: di
     except Exception as e:
         await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
 
-def check_role_permissions(command_name: str):
-    async def predicate(interaction: discord.Interaction) -> bool:
-        # Admins toujours autorisés
-        if interaction.user.guild_permissions.administrator:
-            return True
-
-        # Rôles définis dans la config
-        allowed_roles = config.CONFIG.get("role_permissions", {})
-        user_role_ids = {role.id for role in interaction.user.roles}
-
-        # Vérifie chaque rôle : si l’un d’eux autorise la commande → OK
-        for role_key in allowed_roles:
-            role_id = config.CONFIG.get("roles", {}).get(role_key)
-            if role_id and role_id in user_role_ids:
-                if allowed_roles[role_key].get(command_name, False):
-                    return True
-
-        # Refus : envoyer un message clair
-        await interaction.response.send_message(
-            "❌ Vous n’avez pas la permission d’utiliser cette commande.", 
-            ephemeral=True
-        )
-        return False
-    return discord.app_commands.check(predicate)
-
 
 # ============================
 # === COMMANDES DE SALON ===
 # ============================
 
 @bot.tree.command(name="clear-salon", description="Supprime tous les messages du salon")
+@check_role_permissions("clear-salon")
 @discord.app_commands.checks.has_permissions(manage_messages=True)
 async def clear_salon(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -1464,6 +1467,7 @@ async def clear_salon(interaction: discord.Interaction):
     await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=True)
 
 @bot.tree.command(name="delete-salon", description="Supprime un salon")
+@check_role_permissions("delete-salon")
 @discord.app_commands.checks.has_permissions(manage_channels=True)
 async def delete_salon(interaction: discord.Interaction, salon: discord.TextChannel):
     name = salon.name
@@ -1491,7 +1495,7 @@ async def delete_categorie(interaction: discord.Interaction, categorie: discord.
 # ============================
 
 @bot.tree.command(name="ticket-config", description="Configurer le système de tickets")
-@check_role_permissions("ticket-config")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def ticket_config(interaction: discord.Interaction):
     """Configurer plusieurs systèmes de tickets"""
     await interaction.response.defer(ephemeral=True)
@@ -1608,7 +1612,7 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
             pass
 
 @bot.tree.command(name="ticket-panel", description="Envoie un panneau public de création de ticket")
-@check_role_permissions("icket-panel")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
     systems = config.CONFIG.get("ticket_systems", {})
     if not systems:
@@ -1779,7 +1783,7 @@ class RolePermConfigView(discord.ui.View):
 # ============================
 
 @bot.tree.command(name="role-perms", description="Configurer les permissions par rôle")
-@check_role_permissions("role-perms")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def role_perms(interaction: discord.Interaction):
     class RolePermMainView(discord.ui.View):
         @discord.ui.button(label="Rôle par défaut", style=discord.ButtonStyle.secondary)
@@ -1801,6 +1805,7 @@ async def role_perms(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="kick", description="Expulse un membre")
+@check_role_permissions("kick")
 @discord.app_commands.describe(pseudo="Membre à expulser", raison="Raison du kick")
 @discord.app_commands.checks.has_permissions(kick_members=True)
 async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison: str = "Aucune raison"):
@@ -1832,6 +1837,7 @@ async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison:
     await interaction.response.send_message(f"✅ {pseudo.mention} expulsé.", ephemeral=True)
 
 @bot.tree.command(name="ban", description="Bannit un membre")
+@check_role_permissions("ban")
 @discord.app_commands.describe(pseudo="Membre à bannir", temps="Jours de suppression des messages (0 = aucun)", raison="Raison du ban")
 @discord.app_commands.checks.has_permissions(ban_members=True)
 async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: int = 0, raison: str = "Aucune raison"):
@@ -1863,6 +1869,7 @@ async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: i
     await interaction.response.send_message(f"✅ {pseudo.mention} banni.", ephemeral=True)
 
 @bot.tree.command(name="warn", description="Avertit un membre")
+@check_role_permissions("warn")
 @discord.app_commands.describe(pseudo="Membre à avertir", raison="Raison de l'avertissement")
 @discord.app_commands.checks.has_permissions(manage_messages=True)
 async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison: str = "Aucune raison"):
@@ -1889,19 +1896,19 @@ async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison:
     await interaction.response.send_message(f"✅ Avertissement envoyé.", ephemeral=True)
 
 @bot.tree.command(name="anti-spam", description="Active/désactive l'anti-spam")
-@check_role_permissions("anti-spam")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def anti_spam(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_spam"] = actif
     await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
 @bot.tree.command(name="anti-raid", description="Active/désactive l'anti-raid")
-@check_role_permissions("anti-raid")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def anti_raid(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_raid"] = actif
     await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=True)
 
 @bot.tree.command(name="anti-hack", description="Active/désactive l'anti-hack")
-@check_role_permissions("anti-hack")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def anti_hack(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_hack"] = actif
     await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=True)
@@ -1909,7 +1916,7 @@ async def anti_hack(interaction: discord.Interaction, actif: bool):
 
 # Commande utilitaire pour forcer la synchronisation des commandes sur le serveur courant
 @bot.tree.command(name="sync", description="(Admin) Synchronise les commandes pour ce serveur")
-@check_role_permissions("sync")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def sync_commands(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
@@ -1932,7 +1939,7 @@ async def sync_commands(interaction: discord.Interaction):
 
 @bot.tree.command(name="load-save", description="Charge TOUTE la configuration depuis un salon")
 @discord.app_commands.describe(salon="Salon contenant la sauvegarde")
-@check_role_permissions("load-save")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
     await interaction.response.defer(ephemeral=True)
     loaded = None
@@ -2004,6 +2011,7 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
 # ============================
 
 @bot.tree.command(name="aide", description="Obtenir de l'aide sur les commandes")
+@check_role_permissions("aide")
 async def aide(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🆘 Aide - Commandes Seiko",
@@ -2022,68 +2030,6 @@ async def aide(interaction: discord.Interaction):
     
     embed.set_footer(text="Utilisez /help <commande> pour plus de détails sur une commande.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@bot.tree.command(name="help", description="Obtenir de l'aide sur une commande spécifique")
-@discord.app_commands.describe(commande="La commande sur laquelle vous avez besoin d'aide")
-async def help_cmd(interaction: discord.Interaction, commande: str):
-    command = bot.tree.get_command(commande)
-    if command:
-        embed = discord.Embed(
-            title=f"🆘 Aide - Commande /{command.name}",
-            description=command.description or "Pas de description",
-            color=0x5865F2
-        )
-        # Ajouter les détails de la commande ici si nécessaire
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Commande inconnue.", ephemeral=True)
-
-
-# ============================
-# === COMMANDES DE TEST ===
-# ============================
-
-@bot.tree.command(name="test-embed", description="Envoyer un embed de test")
-async def test_embed(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="Ceci est un test",
-        description="Ceci est un embed de test pour vérifier la mise en forme.",
-        color=0x3498db
-    )
-    embed.add_field(name="Champ 1", value="Ceci est le champ 1", inline=True)
-    embed.add_field(name="Champ 2", value="Ceci est le champ 2", inline=True)
-    embed.set_footer(text="Ceci est un pied de page")
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="test-button", description="Envoyer un message avec un bouton de test")
-async def test_button(interaction: discord.Interaction):
-    view = discord.ui.View()
-    view.add_item(discord.ui.Button(label="Cliquez-moi!", style=discord.ButtonStyle.primary))
-    
-    await interaction.response.send_message("Voici un bouton de test:", view=view, ephemeral=True)
-
-@bot.tree.command(name="test-select", description="Envoyer un message avec un menu déroulant de test")
-async def test_select(interaction: discord.Interaction):
-    select = discord.ui.Select(
-        placeholder="Choisissez une option...",
-        options=[
-            discord.SelectOption(label="Option 1", value="1"),
-            discord.SelectOption(label="Option 2", value="2"),
-            discord.SelectOption(label="Option 3", value="3")
-        ]
-    )
-    
-    async def select_callback(interaction: discord.Interaction):
-        await interaction.response.send_message(f"Vous avez sélectionné l'option {select.values[0]}", ephemeral=True)
-    
-    select.callback = select_callback
-    
-    view = discord.ui.View()
-    view.add_item(select)
-    
-    await interaction.response.send_message("Voici un menu déroulant de test:", view=view, ephemeral=True)
 
 
 # ============================
@@ -2117,6 +2063,7 @@ async def debug_log(interaction: discord.Interaction, message: str):
 # ============================
 
 @bot.tree.command(name="about", description="Informations sur le bot")
+@check_role_permissions("about")
 async def about(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🤖 À propos de Seiko Security",
@@ -2131,6 +2078,7 @@ async def about(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
+@check_role_permissions("invite")
 async def invite(interaction: discord.Interaction):
     await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
 
