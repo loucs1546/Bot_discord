@@ -102,15 +102,14 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         if before.nick != after.nick or before.name != after.name:
-            # Récupérer l'action dans les logs d'audit
             guild = after.guild
             try:
                 async for entry in guild.audit_logs(action=discord.AuditLogAction.member_update, limit=5):
                     if entry.target.id == after.id and (entry.before.nick != entry.after.nick or entry.before.name != entry.after.name):
-                        changer = entry.user  # ← C'est celui qui a modifié
+                        changer = entry.user
                         break
                 else:
-                    changer = after  # Si non trouvé, c'est l'utilisateur lui-même
+                    changer = after
             except:
                 changer = after
 
@@ -163,6 +162,7 @@ class LoggingCog(commands.Cog):
             )
             embed.set_thumbnail(url=after.display_avatar.url)
             await send_log_to(self.bot, "profile", embed)
+
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
