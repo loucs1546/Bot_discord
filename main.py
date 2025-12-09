@@ -1679,10 +1679,71 @@ class TicketPanelButton(discord.ui.Button):
             ephemeral=True
         )
 
+class RolePermConfigView(discord.ui.View):
+    def __init__(self, role_key: str):
+        super().__init__(timeout=600)
+        self.role_key = role_key
+        self.permissions = config.CONFIG.setdefault("role_permissions", {}).setdefault(role_key, {})
+        self.all_commands = [cmd.name for cmd in bot.tree.get_commands() if not cmd.parent]
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.clear_items()
+        for cmd in self.all_commands:
+            enabled = self.permissions.get(cmd, False)
+            btn = discord.ui.Button(
+                label=cmd,
+                style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
+            )
+            btn.callback = self.make_callback(cmd)
+            self.add_item(btn)
+        finish = discord.ui.Button(label="✅ Valider", style=discord.ButtonStyle.green)
+        finish.callback = self.finish
+        self.add_item(finish)
+
+    def make_callback(self, cmd_name):
+        async def callback(interaction: discord.Interaction):
+            self.permissions[cmd_name] = not self.permissions.get(cmd_name, False)
+            self.update_buttons()
+            await interaction.response.edit_message(view=self)
+        return callback
+
+    async def finish(self, interaction: discord.Interaction):
+        # Sauvegarde
+        save_ch = discord.utils.get(interaction.guild.text_channels, name="📁-sauvegarde")
+        if save_ch:
+            import json, io
+            data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+            file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
+            await save_ch.send("💾 **Permissions par rôle mises à jour**", file=file)
+        await interaction.response.send_message("✅ Permissions sauvegardées.", ephemeral=True)
+        self.stop()
 
 # ============================
 # === COMMANDES DE MODÉRATION 
 # ============================
+
+@bot.tree.command(name="role-perms", description="Configurer les permissions par rôle")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def role_perms(interaction: discord.Interaction):
+    class RolePermMainView(discord.ui.View):
+        @discord.ui.button(label="Rôle par défaut", style=discord.ButtonStyle.secondary)
+        async def default_btn(self, i, _):
+            await i.response.send_message("...", view=RolePermConfigView("default"), ephemeral=True)
+        @discord.ui.button(label="Rôle support", style=discord.ButtonStyle.primary)
+        async def support_btn(self, i, _):
+            await i.response.send_message("...", view=RolePermConfigView("support"), ephemeral=True)
+        @discord.ui.button(label="Rôle modérateur", style=discord.ButtonStyle.primary)
+        async def moderator_btn(self, i, _):
+            await i.response.send_message("...", view=RolePermConfigView("moderator"), ephemeral=True)
+        @discord.ui.button(label="Rôle admin", style=discord.ButtonStyle.danger)
+        async def admin_btn(self, i, _):
+            await i.response.send_message("...", view=RolePermConfigView("admin"), ephemeral=True)
+        @discord.ui.button(label="Rôle fondateur", style=discord.ButtonStyle.danger)
+        async def founder_btn(self, i, _):
+            await i.response.send_message("...", view=RolePermConfigView("founder"), ephemeral=True)
+    await interaction.response.send_message("🔧 **Sélectionnez un rôle à configurer :**", view=RolePermMainView(), ephemeral=True)
+
 
 @bot.tree.command(name="kick", description="Expulse un membre")
 @discord.app_commands.describe(pseudo="Membre à expulser", raison="Raison du kick")
@@ -1814,88 +1875,74 @@ async def sync_commands(interaction: discord.Interaction):
 # === COMMANDES DE SAUVEGARDE ===
 # ============================
 
-@bot.tree.command(name="load-save", description="Charge une sauvegarde depuis un salon de sauvegarde")
-@discord.app_commands.describe(salon="Salon contenant la sauvegarde (choix via autocomplete)")
+@bot.tree.command(name="load-save", description="Charge TOUTE la configuration depuis un salon")
+@discord.app_commands.describe(salon="Salon contenant la sauvegarde")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
     await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-    loaded_config = None
-    source_msg = None
+    loaded = None
     try:
-        async for msg in salon.history(limit=300):
+        async for msg in salon.history(limit=100):
             for att in msg.attachments:
-                name = (att.filename or "").lower()
-                if name.endswith(".json"):
-                    try:
-                        raw = await att.read()
-                        import json
-                        loaded_config = json.loads(raw.decode("utf-8", errors="ignore"))
-                        source_msg = msg
-                        break
-                    except Exception:
-                        continue
-            if loaded_config:
+                if att.filename == "POUR_TOI.txt":
+                    raw = await att.read()
+                    import json
+                    loaded = json.loads(raw.decode("utf-8"))
+                    break
+            if loaded:
                 break
-            if msg.content and ("{" in msg.content and "}" in msg.content):
-                try:
-                    import json, re
-                    m = re.search(r"(\{.*\})", msg.content, re.S)
-                    if m:
-                        candidate = m.group(1)
-                        loaded_config = json.loads(candidate)
-                        source_msg = msg
-                        break
-                except Exception:
-                    pass
-        if not loaded_config:
-            await interaction.followup.send(f"❌ Aucune sauvegarde JSON trouvée dans {salon.mention}.", ephemeral=True)
+        if not loaded:
+            await interaction.followup.send("❌ Fichier `POUR_TOI.txt` non trouvé.", ephemeral=True)
             return
 
-        # Nouvelle logique: ne pas créer de salons, mais mapper les logs si existants
-        log_keys = [
-            "messages", "moderation", "ticket", "vocal", "securite",
-            "commands", "profile", "content", "alerts", "sanctions", "giveaway", "bavures"
-        ]
-        found_channels = {}
-        for category in guild.categories:
-            if "log" in category.name.lower() or "surveillance" in category.name.lower():
-                for channel in category.text_channels:
-                    for key in log_keys:
-                        if key in channel.name.lower() or key in channel.name:
-                            found_channels[key] = channel.id
-        missing = [k for k in log_keys if k not in found_channels]
-        if missing:
-            await interaction.followup.send(
-                "❌ Les salons de logs suivants sont manquants :\n" +
-                "\n".join(f"• {k}" for k in missing) +
-                "\n\nVeuillez utiliser `/add-cat-log` pour créer le système de logs avant de charger la sauvegarde.",
-                ephemeral=True
+        # === Mettre à jour TOUT ===
+        config.CONFIG.clear()
+        config.CONFIG.update(loaded)
+
+        # === Recréer les salons de log si absents ===
+        log_cat = None
+        for cat in interaction.guild.categories:
+            if "surveillances" in cat.name.lower():
+                log_cat = cat
+                break
+        if not log_cat:
+            overwrites = {interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False)}
+            log_cat = await interaction.guild.create_category(
+                name="𓆩𖤍𓆪۰⟣ SURVEILLANCES ⟢۰𓆩𖤍𓆪",
+                overwrites=overwrites
             )
-            return
-        # Mettre à jour la config avec les salons trouvés
-        loaded_config.setdefault("logs", {}).update(found_channels)
-        config.CONFIG.update(loaded_config)
-        try:
-            await save_guild_config(guild, config.CONFIG)
-        except Exception:
-            pass
-        keys = ", ".join(sorted(list(loaded_config.keys()))) if isinstance(loaded_config, dict) else "données non structurées"
-        summary = (
-            f"✅ Sauvegarde chargée depuis {salon.mention}.\n"
-            f"🔎 Message source : <@{source_msg.author.id}> (ID: {source_msg.id})\n"
-            f"🗂️ Clés détectées : {keys}\n"
-            f"💾 Configuration mise à jour en mémoire et sauvegardée."
-        )
-        await interaction.followup.send(summary, ephemeral=True)
-        try:
-            embed = discord.Embed(title="🔄 Sauvegarde chargée", description=f"Sauvegarde appliquée pour `{guild.name}` depuis {salon.mention}", color=0x2ecc71, timestamp=datetime.now(timezone.utc))
-            await send_log_to(bot, "commands", embed)
-        except Exception:
-            pass
-    except Exception as e:
-        await interaction.followup.send(f"❌ Erreur durant la lecture du salon : {e}", ephemeral=True)
+            for name in ["📜・messages", "🎤・vocal", "🎫・tickets", "👑・rôles", "🚨・alertes", "⚖️・sanctions", "🛠️・commandes", "📛・profil", "🔍・contenu", "💥・bavures", "🎉・giveaway"]:
+                await interaction.guild.create_text_channel(name=name, category=log_cat, overwrites=overwrites)
 
+        # === Synchroniser les ID de salons existants ===
+        mapping = {
+            "messages": "messages",
+            "vocal": "vocal",
+            "ticket": "tickets",
+            "moderation": "rôles",
+            "securite": "alertes",
+            "sanctions": "sanctions",
+            "commands": "commandes",
+            "profile": "profil",
+            "content": "contenu",
+            "alerts": "alertes",
+            "giveaway": "giveaway",
+            "bavures": "bavures"
+        }
+        log_channels = {}
+        for ch in log_cat.text_channels:
+            for key, keyword in mapping.items():
+                if keyword in ch.name.lower():
+                    log_channels[key] = ch.id
+        config.CONFIG.setdefault("logs", {}).update(log_channels)
+
+        # === Sauvegarder en mémoire ===
+        await save_guild_config(interaction.guild, config.CONFIG)
+
+        await interaction.followup.send("✅ **Configuration complète chargée avec succès !**", ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur : {e}", ephemeral=True)
 
 # ============================
 # === COMMANDES D'ASSISTANCE ===

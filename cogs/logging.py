@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 import core_config as config
 from utils.logging import send_log_to
+from datetime import datetime, timezone
 import re  # ← Ajoute cette ligne
 
 class LoggingCog(commands.Cog):
@@ -291,7 +292,7 @@ class LoggingCog(commands.Cog):
                 title="👋 Bienvenue sur le serveur !",
                 description=f"Bonjour {member.mention},\nBienvenue sur **{member.guild.name}** !\n\nLis le règlement et amuse-toi bien !",
                 color=0x2ecc71,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc) 
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             await welcome_ch.send(embed=embed)
@@ -304,7 +305,7 @@ class LoggingCog(commands.Cog):
                 title="👋 Au revoir...",
                 description=f"**{member}** a quitté le serveur.\nNous espérons te revoir bientôt !",
                 color=0xe74c3c,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc) 
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             await leave_ch.send(embed=embed)
