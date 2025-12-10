@@ -303,15 +303,21 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         welcome_ch = self.bot.get_channel(config.CONFIG.get("channels", {}).get("welcome"))
-        if welcome_ch:
-            embed = discord.Embed(
-                title="👋 Bienvenue sur le serveur !",
-                description=f"Bonjour {member.mention},\nBienvenue sur **{member.guild.name}** !\n\nLis le règlement et amuse-toi bien !",
-                color=0x2ecc71,
-                timestamp=datetime.now(timezone.utc)
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            await welcome_ch.send(embed=embed)
+        if not welcome_ch:
+            return
+
+        embed = discord.Embed(
+            title="🎉 Bienvenue sur le serveur !",
+            description=f"Bonjour {member.mention} !\nNous sommes ravis de t’accueillir parmi nous !",
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc)
+        )
+        # Animation / GIF d'accueil
+        embed.set_image(url="https://media.tenor.com/8bY8Zq5l7JwAAAAC/welcome-discord.gif")  # ← tu peux changer l'URL
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text="Seiko Security • Merci de nous rejoindre !")
+
+        await welcome_ch.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):

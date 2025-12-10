@@ -75,7 +75,7 @@ def check_role_permissions(command_name: str):
         # Refuse
         await interaction.response.send_message(
             "❌ Vous n’avez pas la permission d’utiliser cette commande.",
-            ephemeral=True
+            ephemeral=False
         )
         return False
     return discord.app_commands.check(predicate)
@@ -207,7 +207,7 @@ class RoleSelect(discord.ui.Select):
             return
         role_id = int(self.values[0])
         config.CONFIG.setdefault("roles", {})[self.role_type] = role_id
-        await interaction.response.send_message(f"✅ Rôle {self.role_type} défini : <@&{role_id}>", ephemeral=True)
+        await interaction.response.send_message(f"✅ Rôle {self.role_type} défini : <@&{role_id}>", ephemeral=False)
 
 class ChannelSelect(discord.ui.Select):
     def __init__(self, channel_type: str, channels, page=0, page_size=25):
@@ -244,7 +244,7 @@ class ChannelSelect(discord.ui.Select):
             return
         channel_id = int(self.values[0])
         config.CONFIG.setdefault("channels", {})[self.channel_type] = channel_id
-        await interaction.response.send_message(f"✅ Salon {self.channel_type} défini : <#{channel_id}>", ephemeral=True)
+        await interaction.response.send_message(f"✅ Salon {self.channel_type} défini : <#{channel_id}>", ephemeral=False)
 
 # === VIEWS AVEC SELECT MENUS ===
 class RoleSelectView(discord.ui.View):
@@ -266,7 +266,7 @@ class RoleSelectView(discord.ui.View):
                 try:
                     await interaction.response.edit_message(embed=None, view=back_factory(guild))
                 except Exception:
-                    await interaction.response.send_message("🔙 Retour", ephemeral=True)
+                    await interaction.response.send_message("🔙 Retour", ephemeral=False)
         self.add_item(BackButton())
 
 class ChannelSelectView(discord.ui.View):
@@ -288,7 +288,7 @@ class ChannelSelectView(discord.ui.View):
                 try:
                     await interaction.response.edit_message(embed=None, view=back_factory(guild))
                 except Exception:
-                    await interaction.response.send_message("🔙 Retour", ephemeral=True)
+                    await interaction.response.send_message("🔙 Retour", ephemeral=False)
         self.add_item(BackButton())
 
 class LogChannelSelectView(discord.ui.View):
@@ -304,19 +304,37 @@ class LogChannelSelectView(discord.ui.View):
 @bot.tree.command(name="rule-config", description="Configurer le règlement du serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def rule_config(interaction: discord.Interaction):
-    class RuleModal(discord.ui.Modal, title="📝 Règlement du serveur"):
-        content = discord.ui.TextInput(
-            label="Contenu du règlement",
-            style=discord.TextStyle.paragraph,
-            placeholder="Ex: 1. Pas de spam...\n2. Respect mutuel...",
-            max_length=4000,
-            required=True
-        )
-        async def on_submit(self, i: discord.Interaction):
-            config.CONFIG["rules"] = self.content.value
-            await i.response.send_message("✅ Règlement enregistré.", ephemeral=True)
+    await interaction.response.send_message(
+        "📌 **Veuillez coller le règlement complet dans le chat** (vous avez 5 minutes).\n"
+        "→ Vous pouvez utiliser **gras**, *italique*, `code`, ||spoiler||, etc.\n"
+        "→ Le bot copiera **exactement** ce que vous enverrez.",
+        ephemeral=True
+    )
 
-    await interaction.response.send_modal(RuleModal())
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel
+
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=300)
+        config.CONFIG["rules"] = msg.content
+        # Supprimer le message de l'utilisateur (optionnel)
+        try:
+            await msg.delete()
+        except discord.NotFound:
+            pass  # OK si déjà supprimé
+
+        # Sauvegarder
+        save_ch = discord.utils.get(interaction.guild.text_channels, name="📁-sauvegarde")
+        if save_ch:
+            import json, io
+            data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+            file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
+            await save_ch.send("💾 **Règlement mis à jour**", file=file)
+
+        await interaction.followup.send("✅ Règlement enregistré avec succès.", ephemeral=True)
+
+    except asyncio.TimeoutError:
+        await interaction.followup.send("❌ Temps écoulé. Réessayez `/rule-config`.", ephemeral=True)
 
 class RuleAcceptView(discord.ui.View):
     def __init__(self):
@@ -337,7 +355,7 @@ class RuleAcceptView(discord.ui.View):
             if default_role:
                 await user.add_roles(default_role)
 
-        await interaction.response.send_message("✅ Bienvenue sur le serveur !", ephemeral=True)
+        await interaction.response.send_message("✅ Bienvenue sur le serveur !", ephemeral=False)
 
 @bot.tree.command(name="reach-id", description="Obtenir le pseudo à partir d'une ID utilisateur")
 @check_role_permissions("reach-id")  # ← ton système custom
@@ -345,37 +363,31 @@ async def reach_id(interaction: discord.Interaction, user_id: str):
     try:
         uid = int(user_id)
     except ValueError:
-        await interaction.response.send_message("❌ ID invalide. Doit être un nombre.", ephemeral=True)
+        await interaction.response.send_message("❌ ID invalide. Doit être un nombre.", ephemeral=False)
         return
 
     user = interaction.guild.get_member(uid)
     if user:
-        await interaction.response.send_message(f"✅ ID `{uid}` → **{user}** (`{user.name}#{user.discriminator}`)", ephemeral=True)
+        await interaction.response.send_message(f"✅ ID `{uid}` → **{user}** (`{user.name}#{user.discriminator}`)", ephemeral=False)
     else:
         # Essayer de récupérer depuis Discord (même hors serveur)
         try:
             user = await bot.fetch_user(uid)
-            await interaction.response.send_message(f"✅ ID `{uid}` → **{user}** (hors serveur)", ephemeral=True)
+            await interaction.response.send_message(f"✅ ID `{uid}` → **{user}** (hors serveur)", ephemeral=False)
         except discord.NotFound:
-            await interaction.response.send_message(f"❌ Aucun utilisateur trouvé avec l'ID `{uid}`.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Aucun utilisateur trouvé avec l'ID `{uid}`.", ephemeral=False)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=False)
 
-@bot.tree.command(name="rule", description="Afficher le règlement comme sur la photo")
+@bot.tree.command(name="rule", description="Afficher le règlement du serveur")
 async def rule(interaction: discord.Interaction):
-    # === 1. Répondre immédiatement pour éviter le timeout ===
-    await interaction.response.defer()  # 👈 Crucial
-
-    guild = interaction.guild
-    channel = interaction.channel
-
-    # === 2. Vérifier qu’un règlement existe ===
     rules = config.CONFIG.get("rules")
     if not rules:
-        await interaction.followup.send("❌ Aucun règlement configuré. Utilisez `/rule-config`.", ephemeral=True)
+        await interaction.response.send_message("❌ Aucun règlement configuré. Utilisez `/rule-config`.", ephemeral=True)
         return
 
-    # === 3. S'assurer que le rôle "En attente" existe ===
+    # Créer le rôle "En attente de vérification" si absent
+    guild = interaction.guild
     wait_role = discord.utils.get(guild.roles, name="En attente de vérification")
     if not wait_role:
         wait_role = await guild.create_role(
@@ -383,51 +395,23 @@ async def rule(interaction: discord.Interaction):
             color=discord.Color.dark_gray(),
             hoist=False,
             mentionable=False,
-            reason="Système de règlement"
+            reason="Système de règlement Seiko"
         )
+    # Donner accès uniquement au salon courant
+    await interaction.channel.set_permissions(wait_role, read_messages=True, send_messages=False)
 
-    # === 4. Ne PAS boucler sur TOUS les salons (trop lent) ===
-    # → Seulement bloquer les salons que le bot a déjà configurés (logs, etc.)
-    # → OU laisser la gestion manuelle (recommandé pour éviter timeout)
-    # → Ici, on ne touche qu'au salon courant
-    await channel.set_permissions(wait_role, read_messages=True, send_messages=False)
-
-    # === 5. Créer l'embed comme sur ta photo ===
+    # Envoyer le règlement EXACTEMENT comme il a été saisi
     embed = discord.Embed(
-        title="📜 Règlement Discord",
+        title="📜 Règlement du serveur",
+        description=rules,  # ← mise en forme conservée
         color=0x2f3136,
         timestamp=datetime.now(timezone.utc)
     )
-    embed.add_field(
-        name="🔷 Règle Généraux",
-        value="+ Avoir un Pseudo Rôles play\n+ Créer un environnement Sain",
-        inline=False
-    )
-    embed.add_field(
-        name="🔷 Règle Textuel",
-        value=(
-            "- Pas de Spam\n"
-            "- Pas de Racisme, Politique\n"
-            "- Pas de Harcèlement, Sexisme\n"
-            "- Pas de Discours de Haine\n"
-            "- Pas de Contenu NSFW\n"
-            "- Pas De PUB MP\n"
-            "- Pas de Spam Mention"
-        ),
-        inline=False
-    )
-    embed.add_field(
-        name="🔷 Règle Vocal",
-        value="- Aucun bruit gênant, fort ou aigu.\n- Aucune soundboard",
-        inline=False
-    )
-    embed.set_image(url="https://i.imgur.com/7K9YhUa.png")
-    embed.set_footer(text="L'équipe D'Impact Life")
+    embed.set_footer(text="Cliquez sur ✅ pour accepter le règlement et accéder au serveur.")
 
-    # === 6. Envoyer avec followup (pas response) ===
     view = RuleAcceptView()
-    bot.add_view(view)  # pour persistance après reboot
-    await interaction.followup.send(embed=embed, view=view)
+    bot.add_view(view)  # persistance après reboot
+    await interaction.response.send_message(embed=embed, view=view)
 
 class AdvancedTicketSelect(discord.ui.Select):
     def __init__(self, ticket_system: str):
@@ -458,13 +442,13 @@ class AdvancedTicketSelect(discord.ui.Select):
         # Empêcher doublons
         for ch in guild.channels:
             if ch.name.startswith("ticket-") and str(user.id) in ch.name:
-                await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=True)
+                await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=False)
                 return
 
         systems = config.CONFIG.get("ticket_systems", {})
         sys_conf = systems.get(self.ticket_system)
         if not sys_conf:
-            await interaction.response.send_message("❌ Système introuvable.", ephemeral=True)
+            await interaction.response.send_message("❌ Système introuvable.", ephemeral=False)
             return
 
         counter = sys_conf.get("counter", 0) + 1
@@ -503,7 +487,7 @@ class AdvancedTicketSelect(discord.ui.Select):
                 reason=f"Ticket créé par {user} ({selected_option})"
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=False)
             return
 
         # === Message dans le ticket ===
@@ -534,7 +518,7 @@ class AdvancedTicketSelect(discord.ui.Select):
         # === Réponse à l'utilisateur ===
         await interaction.response.send_message(
             f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
-            ephemeral=True
+            ephemeral=False
         )
 
 class AdvancedTicketView(discord.ui.View):
@@ -555,13 +539,13 @@ class BasicTicketView(discord.ui.View):
         # Empêcher doublons
         for ch in guild.channels:
             if ch.name.startswith("ticket-") and str(user.id) in ch.name:
-                await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=True)
+                await interaction.response.send_message("❌ Vous avez déjà un ticket ouvert.", ephemeral=False)
                 return
 
         systems = config.CONFIG.get("ticket_systems", {})
         sys_conf = systems.get(self.ticket_system)
         if not sys_conf:
-            await interaction.response.send_message("❌ Système introuvable.", ephemeral=True)
+            await interaction.response.send_message("❌ Système introuvable.", ephemeral=False)
             return
 
         options = sys_conf.get("options", ["Support Général"])
@@ -603,7 +587,7 @@ class BasicTicketView(discord.ui.View):
                 reason=f"Ticket créé par {user} ({selected_option})"
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=False)
             return
 
         # Message dans le ticket
@@ -633,7 +617,7 @@ class BasicTicketView(discord.ui.View):
 
         await interaction.response.send_message(
             f"✅ Ticket **{ticket_name}** créé : {ticket_channel.mention}",
-            ephemeral=True
+            ephemeral=False
         )
 
 class TicketManagementView(discord.ui.View):
@@ -646,7 +630,7 @@ class TicketManagementView(discord.ui.View):
     @discord.ui.button(label="👤 Claim", style=discord.ButtonStyle.primary, emoji="✋")
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not has_ticket_permissions(interaction.user):
-            await interaction.response.send_message("❌ Vous n’avez pas la permission.", ephemeral=True)
+            await interaction.response.send_message("❌ Vous n’avez pas la permission.", ephemeral=False)
             return
         
         await interaction.response.defer()
@@ -689,22 +673,22 @@ class TicketManagementView(discord.ui.View):
                 allowed = True
                 break
         if not allowed:
-            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
+            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=False)
             return
 
         await interaction.response.defer()
         # Envoyer un message public dans le ticket
         try:
             await interaction.channel.send(f"✅ {interaction.user.mention} prend en charge votre demande.")
-            await interaction.followup.send("✅ Vous avez pris en charge le ticket.", ephemeral=True)
+            await interaction.followup.send("✅ Vous avez pris en charge le ticket.", ephemeral=False)
         except Exception as e:
-            await interaction.followup.send(f"❌ Erreur: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Erreur: {e}", ephemeral=False)
     
     @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, emoji="❌", custom_id="ticket_delete")
     async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Delete = Supprimer le canal avec confirmation"""
         if not any(role.permissions.administrator or role.permissions.manage_messages for role in interaction.user.roles):
-            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=True)
+            await interaction.response.send_message("❌ Permissions insuffisantes.", ephemeral=False)
             return
         
         # Confirmation
@@ -757,9 +741,9 @@ class TicketManagementView(discord.ui.View):
 
             @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
             async def cancel_delete(self, cancel_interaction: discord.Interaction, cancel_button: discord.ui.Button):
-                await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=True)      
+                await cancel_interaction.response.send_message("❌ Suppression annulée.", ephemeral=False)      
 
-        await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(interaction.channel, owner_id=self.owner_id, ticket_num=self.ticket_num), ephemeral=False)
 
 def has_ticket_permissions(user: discord.Member) -> bool:
     allowed_ids = []
@@ -885,7 +869,7 @@ async def self_ping_loop():
 @check_role_permissions("ping")
 async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
-    await interaction.response.send_message(f"🏓 Pong ! Latence : **{latency} ms**", ephemeral=True)
+    await interaction.response.send_message(f"🏓 Pong ! Latence : **{latency} ms**", ephemeral=False)
 
 
 # ============================
@@ -896,7 +880,7 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="start", description="Configurer complètement le bot pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def start_config(interaction: discord.Interaction):
-    await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=False)
+    await interaction.response.send_message("🚀 **Démarrage de la configuration complète…**", ephemeral=True)
     guild = interaction.guild
 
     # --- Salons ---
@@ -1049,10 +1033,10 @@ async def role_config(interaction: discord.Interaction):
                 support_id = int(self.support_role.value.strip("<@&>"))
                 config.CONFIG.setdefault("allowed_roles", {})["moderator"] = mod_id
                 config.CONFIG["allowed_roles"]["support"] = support_id
-                await i.response.send_message("✅ Rôles configurés pour les commandes restreintes.", ephemeral=True)
+                await i.response.send_message("✅ Rôles configurés pour les commandes restreintes.", ephemeral=False)
                 await save_guild_config(i.guild, config.CONFIG)
             except ValueError:
-                await i.response.send_message("❌ ID ou mention invalide.", ephemeral=True)
+                await i.response.send_message("❌ ID ou mention invalide.", ephemeral=False)
     await interaction.response.send_modal(RoleConfigModal())
 
 def has_restricted_role(interaction: discord.Interaction) -> bool:
@@ -1073,12 +1057,12 @@ class LogCreationChoiceView(discord.ui.View):
     @discord.ui.button(label="✅ Oui, créer les logs", style=discord.ButtonStyle.success)
     async def yes(self, i, _):
         self.create_logs = True
-        await i.response.send_message("✅ Création des logs activée.", ephemeral=True)
+        await i.response.send_message("✅ Création des logs activée.", ephemeral=False)
         self.stop()
     @discord.ui.button(label="❌ Non, ignorer", style=discord.ButtonStyle.danger)
     async def no(self, i, _):
         self.create_logs = False
-        await i.response.send_message("❌ Aucun log ne sera créé.", ephemeral=True)
+        await i.response.send_message("❌ Aucun log ne sera créé.", ephemeral=False)
         self.stop()
 
 class PersistentTicketPanelView(discord.ui.View):
@@ -1114,7 +1098,7 @@ class PersistentTicketPanelView(discord.ui.View):
 
     async def create_ticket(self, interaction: discord.Interaction):
         if not self.selected_option:
-            await interaction.response.send_message("❌ Sélectionnez d’abord un type de ticket.", ephemeral=True)
+            await interaction.response.send_message("❌ Sélectionnez d’abord un type de ticket.", ephemeral=False)
             return
         # ... logique de création de ticket (copie de TicketChoiceView.create_button)
         # (tu peux extraire cette logique dans une fonction séparée)
@@ -1161,7 +1145,7 @@ async def reset_config(interaction: discord.Interaction):
     await interaction.response.send_message(
         "✅ Configuration **complètement réinitialisée**.\n"
         "Utilisez `/start` pour recommencer la configuration.",
-        ephemeral=True
+        ephemeral=False
     )
 
 @bot.tree.command(name="config", description="Modifier la configuration actuelle")
@@ -1239,7 +1223,7 @@ class ConfigLogsView(discord.ui.View):
 # === UTILITAIRES POUR /start ===
 
 async def prompt_channel(interaction: discord.Interaction, label: str):
-    await interaction.followup.send(f"📌 Sélectionnez le **{label}** :", ephemeral=True)
+    await interaction.followup.send(f"📌 Sélectionnez le **{label}** :", ephemeral=False)
     channel_msg = await interaction.channel.send("En attente de sélection...")
     try:
         def check(m):
@@ -1250,11 +1234,11 @@ async def prompt_channel(interaction: discord.Interaction, label: str):
         return msg.channel_mentions[0]
     except asyncio.TimeoutError:
         await channel_msg.delete()
-        await interaction.followup.send(f"❌ Temps écoulé pour le {label}.", ephemeral=True)
+        await interaction.followup.send(f"❌ Temps écoulé pour le {label}.", ephemeral=False)
         return None
 
 async def prompt_role(interaction: discord.Interaction, label: str):
-    await interaction.followup.send(f"📌 Mentionnez le **{label}** (ex: @Modérateur) :", ephemeral=True)
+    await interaction.followup.send(f"📌 Mentionnez le **{label}** (ex: @Modérateur) :", ephemeral=False)
     role_msg = await interaction.channel.send("En attente...")
     try:
         def check(m):
@@ -1265,7 +1249,7 @@ async def prompt_role(interaction: discord.Interaction, label: str):
         return msg.role_mentions[0]
     except asyncio.TimeoutError:
         await role_msg.delete()
-        await interaction.followup.send(f"❌ Temps écoulé pour le {label}.", ephemeral=True)
+        await interaction.followup.send(f"❌ Temps écoulé pour le {label}.", ephemeral=False)
         return None
 
 class TicketModeChoiceView(discord.ui.View):
@@ -1289,7 +1273,7 @@ class ContinueButtonView(discord.ui.View):
 
     @discord.ui.button(label="Continuer", style=discord.ButtonStyle.green)
     async def continue_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("✅ Continuation validée.", ephemeral=True)
+        await interaction.response.send_message("✅ Continuation validée.", ephemeral=False)
         self.stop()
 
 class SecurityConfigView(discord.ui.View):
@@ -1319,7 +1303,7 @@ class SecurityConfigView(discord.ui.View):
     async def toggle_hack(self, i): self.anti_hack = not self.anti_hack; config.CONFIG.setdefault("security", {})["anti_hack"] = self.anti_hack; self.update_buttons(); await i.response.edit_message(view=self)
 
     async def finish(self, interaction: discord.Interaction):
-        await interaction.response.send_message("✅ Configuration de sécurité sauvegardée.", ephemeral=True)
+        await interaction.response.send_message("✅ Configuration de sécurité sauvegardée.", ephemeral=False)
         self.stop()
 
 # ============================
@@ -1344,12 +1328,12 @@ async def logs_cmd(interaction: discord.Interaction, type: str, salon: discord.T
         color=0x2f3136,
         timestamp=discord.utils.utcnow()
     )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 @bot.tree.command(name="scan-deleted", description="Récupère les suppressions récentes manquées")
-@check_role_permissions("nom")
+@check_role_permissions("scan-deleted")
 async def scan_deleted(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     count = 0
     async for entry in interaction.guild.audit_logs(action=discord.AuditLogAction.message_delete, limit=50):
         if (discord.utils.utcnow() - entry.created_at).total_seconds() > 300:
@@ -1362,19 +1346,19 @@ async def scan_deleted(interaction: discord.Interaction):
         )
         await send_log_to(bot, "messages", embed)
         count += 1
-    await interaction.followup.send(f"✅ {count} suppressions récupérées.", ephemeral=True)
+    await interaction.followup.send(f"✅ {count} suppressions récupérées.", ephemeral=False)
 
 @bot.tree.command(name="add-cat-log", description="Crée une catégorie complète de salons de surveillance")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def add_cat_log(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     guild = interaction.guild
 
     for category in guild.categories:
         if "log" in category.name.lower() or "surveillance" in category.name.lower():
             await interaction.followup.send(
                 f"❌ Une catégorie de logs existe déjà : **{category.name}**",
-                ephemeral=True
+                ephemeral=False
             )
             return
 
@@ -1423,29 +1407,29 @@ async def add_cat_log(interaction: discord.Interaction):
 
         await interaction.followup.send(
             f"✅ Catégorie **{category.name}** créée avec {len(salon_configs)} salons !",
-            ephemeral=True
+            ephemeral=False
         )
 
     except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="create-salon", description="Crée un salon dans une catégorie")
 @discord.app_commands.describe(
     nom="Nom du salon",
     categorie="Catégorie où créer le salon"
 )
-@check_role_permissions("nom")
+@check_role_permissions("create-salon")
 async def create_salon(interaction: discord.Interaction, nom: str, categorie: discord.CategoryChannel):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         channel = await categorie.create_text_channel(name=nom)
         await interaction.followup.send(
             f"✅ Salon **#{channel.name}** créé dans **{categorie.name}** !\nID : `{channel.id}`",
-            ephemeral=True
+            ephemeral=False
         )
     except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Erreur : {str(e)}", ephemeral=False)
 
 
 # ============================
@@ -1455,22 +1439,22 @@ async def create_salon(interaction: discord.Interaction, nom: str, categorie: di
 @bot.tree.command(name="clear-salon", description="Supprime tous les messages du salon")
 @check_role_permissions("clear-salon")
 async def clear_salon(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     deleted = await interaction.channel.purge(limit=1000)
-    await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=True)
+    await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=False)
 
 @bot.tree.command(name="delete-salon", description="Supprime un salon")
 @check_role_permissions("delete-salon")
 async def delete_salon(interaction: discord.Interaction, salon: discord.TextChannel):
     name = salon.name
     await salon.delete(reason=f"Supprimé par {interaction.user}")
-    await interaction.response.send_message(f"✅ Salon **{name}** supprimé.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Salon **{name}** supprimé.", ephemeral=False)
 
 @bot.tree.command(name="delete-categorie", description="Supprime une catégorie et ses salons")
 @discord.app_commands.describe(categorie="Catégorie à supprimer")
 @discord.app_commands.checks.has_permissions(manage_channels=True)
 async def delete_categorie(interaction: discord.Interaction, categorie: discord.CategoryChannel):
-    await interaction.response.send_message("✅ Suppression en cours...", ephemeral=True)
+    await interaction.response.send_message("✅ Suppression en cours...", ephemeral=False)
     for channel in categorie.channels:
         try:
             await channel.delete(reason=f"Supprimé avec la catégorie par {interaction.user}")
@@ -1513,7 +1497,7 @@ class TicketSystemButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.send_message(
             f"Configuration du système de ticket **{self.sys_name}**",
-            view=TicketConfigView(ticket_system=self.sys_name), ephemeral=True
+            view=TicketConfigView(ticket_system=self.sys_name), ephemeral=False
         )
 
 class NewTicketSystemButton(discord.ui.Button):
@@ -1527,7 +1511,7 @@ class NewTicketSystemModal(discord.ui.Modal, title="Nouveau système de tickets"
     async def on_submit(self, interaction: discord.Interaction):
         sys_name = self.name.value.strip()
         if not sys_name:
-            await interaction.response.send_message("❌ Nom invalide.", ephemeral=True)
+            await interaction.response.send_message("❌ Nom invalide.", ephemeral=False)
             return
         config.CONFIG.setdefault("ticket_systems", {})[sys_name] = {
             "mode": "basic",
@@ -1536,7 +1520,7 @@ class NewTicketSystemModal(discord.ui.Modal, title="Nouveau système de tickets"
         }
         await interaction.response.send_message(
             f"Système **{sys_name}** créé. Configurez-le ci-dessous.",
-            view=TicketConfigView(ticket_system=sys_name), ephemeral=True
+            view=TicketConfigView(ticket_system=sys_name), ephemeral=False
         )
 
 class TicketConfigView(discord.ui.View):
@@ -1556,7 +1540,7 @@ class TicketConfigView(discord.ui.View):
             "Autre"
         ]
         await interaction.response.send_message(
-            f"✅ Mode Basic activé pour **{sys}**.", ephemeral=True
+            f"✅ Mode Basic activé pour **{sys}**.", ephemeral=False
         )
         try:
             await save_guild_config(interaction.guild, config.CONFIG)
@@ -1590,14 +1574,14 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
             if val:
                 opts.append(val)
         if not opts:
-            await interaction.response.send_message("❌ Au moins une option est requise.", ephemeral=True)
+            await interaction.response.send_message("❌ Au moins une option est requise.", ephemeral=False)
             return
 
         config.CONFIG.setdefault("ticket_systems", {}).setdefault(self.sys_name, {})
         config.CONFIG["ticket_systems"][self.sys_name]["mode"] = "advanced"
         config.CONFIG["ticket_systems"][self.sys_name]["options"] = opts
         message = f"✅ **{len(opts)} options** définies pour **{self.sys_name}** :\n" + "\n".join(f"• {o}" for o in opts)
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message, ephemeral=False)
         try:
             await save_guild_config(interaction.guild, config.CONFIG)
         except Exception:
@@ -1608,15 +1592,15 @@ class TicketOptionsModal(discord.ui.Modal, title="Configurer les options du tick
 async def ticket_panel(interaction: discord.Interaction):
     systems = config.CONFIG.get("ticket_systems", {})
     if not systems:
-        await interaction.response.send_message("❌ Aucun système de ticket configuré. Utilisez `/ticket-config`.", ephemeral=True)
+        await interaction.response.send_message("❌ Aucun système de ticket configuré. Utilisez `/ticket-config`.", ephemeral=False)
         return
     if len(systems) == 1:
         sys_name = next(iter(systems))
         await send_public_ticket_panel(interaction, sys_name)
-        await interaction.response.send_message(f"✅ Panel **{sys_name}** envoyé.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Panel **{sys_name}** envoyé.", ephemeral=False)
     else:
         view = TicketSystemChoiceView(systems, interaction.channel)
-        await interaction.response.send_message("Choisissez le système de ticket à afficher publiquement :", view=view, ephemeral=True)
+        await interaction.response.send_message("Choisissez le système de ticket à afficher publiquement :", view=view, ephemeral=False)
 
 
 class TicketSystemChoiceView(discord.ui.View):
@@ -1635,7 +1619,7 @@ class TicketSystemSelectButton(discord.ui.Button):
         # ✅ Envoie d'abord une réponse
         await interaction.response.send_message(
             f"✅ Panel **{self.sys_name}** envoyé dans {interaction.channel.mention}.", 
-            ephemeral=True
+            ephemeral=False
         )
         # ✅ Envoie ensuite le panel public
         await send_public_ticket_panel(interaction, self.sys_name)
@@ -1697,7 +1681,7 @@ class TicketPanelButton(discord.ui.Button):
         await interaction.response.send_message(
             f"Panel pour **{self.sys_name}**",
             view=TicketView(ticket_system=self.sys_name),
-            ephemeral=True
+            ephemeral=False
         )
 
 class RolePermConfigView(discord.ui.View):
@@ -1767,7 +1751,7 @@ class RolePermConfigView(discord.ui.View):
             data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
             file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
             await save_ch.send("💾 **Permissions par rôle mises à jour**", file=file)
-        await interaction.response.send_message("✅ Permissions sauvegardées.", ephemeral=True)
+        await interaction.response.send_message("✅ Permissions sauvegardées.", ephemeral=False)
         self.stop()
 
 # ============================
@@ -1793,7 +1777,7 @@ async def role_perms(interaction: discord.Interaction):
         @discord.ui.button(label="Rôle fondateur", style=discord.ButtonStyle.danger)
         async def founder_btn(self, i, _):
             await i.response.send_message("...", view=RolePermConfigView("founder"), ephemeral=True)
-    await interaction.response.send_message("🔧 **Sélectionnez un rôle à configurer :**", view=RolePermMainView(), ephemeral=True)
+    await interaction.response.send_message("🔧 **Sélectionnez un rôle à configurer :**", view=RolePermMainView(), ephemeral=False)
 
 
 @bot.tree.command(name="kick", description="Expulse un membre")
@@ -1809,7 +1793,7 @@ async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison:
             timestamp=discord.utils.utcnow()
         )
         await send_log_to(bot, "bavures", embed)
-        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=True)
+        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=False)
         return
 
     try:
@@ -1826,12 +1810,11 @@ async def kick(interaction: discord.Interaction, pseudo: discord.Member, raison:
     ch = get_sanction_channel(bot)
     if ch: 
         await ch.send(embed=embed)
-    await interaction.response.send_message(f"✅ {pseudo.mention} expulsé.", ephemeral=True)
+    await interaction.response.send_message(f"✅ {pseudo.mention} expulsé.", ephemeral=False)
 
 @bot.tree.command(name="ban", description="Bannit un membre")
 @check_role_permissions("ban")
 @discord.app_commands.describe(pseudo="Membre à bannir", temps="Jours de suppression des messages (0 = aucun)", raison="Raison du ban")
-@discord.app_commands.checks.has_permissions(ban_members=True)
 async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: int = 0, raison: str = "Aucune raison"):
     if est_bavure_raison(raison):
         embed = discord.Embed(
@@ -1841,7 +1824,7 @@ async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: i
             timestamp=discord.utils.utcnow()
         )
         await send_log_to(bot, "bavures", embed)
-        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=True)
+        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=False)
         return
 
     try:
@@ -1858,7 +1841,7 @@ async def ban(interaction: discord.Interaction, pseudo: discord.Member, temps: i
     ch = get_sanction_channel(bot)
     if ch: 
         await ch.send(embed=embed)
-    await interaction.response.send_message(f"✅ {pseudo.mention} banni.", ephemeral=True)
+    await interaction.response.send_message(f"✅ {pseudo.mention} banni.", ephemeral=False)
 
 @bot.tree.command(name="warn", description="Avertit un membre")
 @check_role_permissions("warn")
@@ -1872,7 +1855,7 @@ async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison:
             timestamp=discord.utils.utcnow()
         )
         await send_log_to(bot, "bavures", embed)
-        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=True)
+        await interaction.response.send_message("❌ La raison est invalide (moins de 2 mots ou texte aléatoire).", ephemeral=False)
         return
 
     embed = discord.Embed(
@@ -1884,44 +1867,44 @@ async def warn(interaction: discord.Interaction, pseudo: discord.Member, raison:
     ch = get_sanction_channel(bot)
     if ch: 
         await ch.send(embed=embed)
-    await interaction.response.send_message(f"✅ Avertissement envoyé.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Avertissement envoyé.", ephemeral=False)
 
 @bot.tree.command(name="anti-spam", description="Active/désactive l'anti-spam")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def anti_spam(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_spam"] = actif
-    await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Anti-spam {'activé' if actif else 'désactivé'}.", ephemeral=False)
 
 @bot.tree.command(name="anti-raid", description="Active/désactive l'anti-raid")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def anti_raid(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_raid"] = actif
-    await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Anti-raid {'activé' if actif else 'désactivé'}.", ephemeral=False)
 
 @bot.tree.command(name="anti-hack", description="Active/désactive l'anti-hack")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def anti_hack(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_hack"] = actif
-    await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=False)
 
 
 # Commande utilitaire pour forcer la synchronisation des commandes sur le serveur courant
 @bot.tree.command(name="sync", description="(Admin) Synchronise les commandes pour ce serveur")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def sync_commands(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     guild = interaction.guild
     try:
         if guild:
             # Copier les commandes globales vers le guild et synchroniser
             bot.tree.copy_global_to(guild=discord.Object(id=guild.id))
             synced = await bot.tree.sync(guild=discord.Object(id=guild.id))
-            await interaction.followup.send(f"✅ {len(synced)} commandes synchronisées pour ce serveur.", ephemeral=True)
+            await interaction.followup.send(f"✅ {len(synced)} commandes synchronisées pour ce serveur.", ephemeral=False)
         else:
             synced = await bot.tree.sync()
-            await interaction.followup.send(f"✅ {len(synced)} commandes globales synchronisées.", ephemeral=True)
+            await interaction.followup.send(f"✅ {len(synced)} commandes globales synchronisées.", ephemeral=False)
     except Exception as e:
-        await interaction.followup.send(f"❌ Échec de la sync: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Échec de la sync: {e}", ephemeral=False)
 
 
 # ============================
@@ -1932,7 +1915,7 @@ async def sync_commands(interaction: discord.Interaction):
 @discord.app_commands.describe(salon="Salon contenant la sauvegarde")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def load_save(interaction: discord.Interaction, salon: discord.TextChannel):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     loaded = None
     try:
         async for msg in salon.history(limit=100):
@@ -1945,7 +1928,7 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
             if loaded:
                 break
         if not loaded:
-            await interaction.followup.send("❌ Fichier `POUR_TOI.txt` non trouvé.", ephemeral=True)
+            await interaction.followup.send("❌ Fichier `POUR_TOI.txt` non trouvé.", ephemeral=False)
             return
 
         # === Mettre à jour TOUT ===
@@ -1992,10 +1975,10 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
         # === Sauvegarder en mémoire ===
         await save_guild_config(interaction.guild, config.CONFIG)
 
-        await interaction.followup.send("✅ **Configuration complète chargée avec succès !**", ephemeral=True)
+        await interaction.followup.send("✅ **Configuration complète chargée avec succès !**", ephemeral=False)
 
     except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Erreur : {e}", ephemeral=False)
 
 # ============================
 # === COMMANDES D'ASSISTANCE ===
@@ -2020,7 +2003,7 @@ async def aide(interaction: discord.Interaction):
             )
     
     embed.set_footer(text="Utilisez /help <commande> pour plus de détails sur une commande.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
 # ============================
@@ -2032,11 +2015,11 @@ async def debug_sentry(interaction: discord.Interaction):
     try:
         division_par_zero = 1 / 0  # Ceci va causer une exception
     except Exception as e:
-        await interaction.response.send_message("✅ Erreur capturée et envoyée à Sentry.", ephemeral=True)
+        await interaction.response.send_message("✅ Erreur capturée et envoyée à Sentry.", ephemeral=False)
         import sentry_sdk
         sentry_sdk.capture_exception(e)
     else:
-        await interaction.response.send_message("❌ Aucune erreur n'a été levée.", ephemeral=True)
+        await interaction.response.send_message("❌ Aucune erreur n'a été levée.", ephemeral=False)
 
 
 @bot.tree.command(name="debug-log", description="Envoyer un message de log personnalisé")
@@ -2044,9 +2027,9 @@ async def debug_sentry(interaction: discord.Interaction):
 async def debug_log(interaction: discord.Interaction, message: str):
     try:
         await send_log_to(bot, "commands", f"Log de debug: {message}")
-        await interaction.response.send_message("✅ Message de log envoyé.", ephemeral=True)
+        await interaction.response.send_message("✅ Message de log envoyé.", ephemeral=False)
     except Exception as e:
-        await interaction.response.send_message(f"❌ Erreur lors de l'envoi du log: {e}", ephemeral=True)
+        await interaction.response.send_message(f"❌ Erreur lors de l'envoi du log: {e}", ephemeral=False)
 
 
 # ============================
@@ -2066,11 +2049,11 @@ async def about(interaction: discord.Interaction):
     embed.add_field(name="Version", value="1.0.0", inline=True)
     embed.set_footer(text="Merci d'utiliser Seiko Security!")
     
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 @bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
 @check_role_permissions("invite")
 async def invite(interaction: discord.Interaction):
-    await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=True)
+    await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=False)
 
 bot.run(config.DISCORD_TOKEN)
