@@ -33,9 +33,7 @@ CONFIG: Dict[str, Any] = {
         "moderator": None,
         "founder": None
     }
-    "rules": {
-        "rules": "Règlement par défaut"
-    }
+    "rules": ""
 }
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
