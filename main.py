@@ -866,7 +866,6 @@ async def self_ping_loop():
 # ============================
 
 @bot.tree.command(name="ping", description="Affiche la latence du bot")
-@check_role_permissions("ping")
 async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(f"🏓 Pong ! Latence : **{latency} ms**", ephemeral=False)
@@ -1891,7 +1890,7 @@ async def anti_hack(interaction: discord.Interaction, actif: bool):
 
 # Commande utilitaire pour forcer la synchronisation des commandes sur le serveur courant
 @bot.tree.command(name="sync", description="(Admin) Synchronise les commandes pour ce serveur")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("sync")
 async def sync_commands(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     guild = interaction.guild
@@ -1986,7 +1985,6 @@ async def load_save(interaction: discord.Interaction, salon: discord.TextChannel
 # ============================
 
 @bot.tree.command(name="aide", description="Obtenir de l'aide sur les commandes")
-@check_role_permissions("aide")
 async def aide(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🆘 Aide - Commandes Seiko",
@@ -2008,37 +2006,10 @@ async def aide(interaction: discord.Interaction):
 
 
 # ============================
-# === COMMANDES DE DEBUG ===
-# ============================
-
-@bot.tree.command(name="debug-sentry", description="Tester l'envoi d'une erreur à Sentry")
-async def debug_sentry(interaction: discord.Interaction):
-    try:
-        division_par_zero = 1 / 0  # Ceci va causer une exception
-    except Exception as e:
-        await interaction.response.send_message("✅ Erreur capturée et envoyée à Sentry.", ephemeral=False)
-        import sentry_sdk
-        sentry_sdk.capture_exception(e)
-    else:
-        await interaction.response.send_message("❌ Aucune erreur n'a été levée.", ephemeral=False)
-
-
-@bot.tree.command(name="debug-log", description="Envoyer un message de log personnalisé")
-@discord.app_commands.describe(message="Le message à envoyer dans les logs")
-async def debug_log(interaction: discord.Interaction, message: str):
-    try:
-        await send_log_to(bot, "commands", f"Log de debug: {message}")
-        await interaction.response.send_message("✅ Message de log envoyé.", ephemeral=False)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Erreur lors de l'envoi du log: {e}", ephemeral=False)
-
-
-# ============================
 # === COMMANDES GÉNÉRALES (suite) ===
 # ============================
 
 @bot.tree.command(name="about", description="Informations sur le bot")
-@check_role_permissions("about")
 async def about(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🤖 À propos de Seiko Security",
@@ -2053,7 +2024,6 @@ async def about(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
 @bot.tree.command(name="invite", description="Obtenir le lien d'invitation du bot")
-@check_role_permissions("invite")
 async def invite(interaction: discord.Interaction):
     await interaction.response.send_message("🔗 [Cliquez ici pour inviter Seiko Security sur votre serveur](https://discord.com/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=8)", ephemeral=False)
 
