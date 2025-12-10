@@ -32,7 +32,7 @@ CONFIG: Dict[str, Any] = {
         "admin": None,
         "moderator": None,
         "founder": None
-    }
+    },
     "rules": ""
 }
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
