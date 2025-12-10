@@ -30,18 +30,17 @@ class ContentFilterCog(commands.Cog):
             except:
                 pass
 
+            # Crée un embed ou un message à logger
             embed = discord.Embed(
-                title="⚠️ Contenu suspect",
+                title="🔍 Contenu filtré",
                 description=f"**Auteur** : {message.author.mention}\n**Salon** : {message.channel.mention}",
                 color=0xff6600,
-                timestamp=discord.utils.utcnow()
+                timestamp=message.created_at
             )
             if message.content:
-                embed.add_field(name="Contenu", value=message.content[:1020], inline=False)
+                embed.add_field(name="Contenu", value=message.content[:1000], inline=False)
 
-            view = ContentReviewView(message.content, message.author, message.channel, self.bot)
-            await send_log_to(self.bot, "content", embed)
-            await send_log_to(self.bot, "content", view=view)
+            await send_log_to(self.bot, "content", embed)  # ← embed = content
 
 async def setup(bot):
     await bot.add_cog(ContentFilterCog(bot))

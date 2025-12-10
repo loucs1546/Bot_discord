@@ -1438,10 +1438,11 @@ async def create_salon(interaction: discord.Interaction, nom: str, categorie: di
 
 @bot.tree.command(name="clear-salon", description="Supprime tous les messages du salon")
 @check_role_permissions("clear-salon")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
 async def clear_salon(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=False)
+    await interaction.response.defer(ephemeral=True)  # ← OBLIGATOIRE
     deleted = await interaction.channel.purge(limit=1000)
-    await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=False)
+    await interaction.followup.send(f"🧹 **{len(deleted)}** messages supprimés.", ephemeral=True)
 
 @bot.tree.command(name="delete-salon", description="Supprime un salon")
 @check_role_permissions("delete-salon")
