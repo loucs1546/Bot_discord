@@ -1775,7 +1775,7 @@ class RolePermConfigView(discord.ui.View):
 # ============================
 
 @bot.tree.command(name="role-perms", description="Configurer les permissions par rôle")
-@discord.app_commands.checks.has_permissions(administrator=True)
+@check_role_permissions("role-perms") 
 async def role_perms(interaction: discord.Interaction):
     class RolePermMainView(discord.ui.View):
         @discord.ui.button(label="Rôle par défaut", style=discord.ButtonStyle.secondary)

@@ -270,7 +270,9 @@ class LoggingCog(commands.Cog):
                 color=0xff6600,
                 timestamp=discord.utils.utcnow()
             )
-            await send_log_to(self.bot, "bavures", embed)
+            if est_bavure_raison(before, after):
+                embed = discord.Embed(...)
+                await send_log_to(self.bot, "bavures", embed)  # ← 4 ou 8 espaces, selon le contexte
 
         # === LOG NORMAL DANS 'commands' ===
         desc = f"**Utilisateur** : {interaction.user.mention}\n**Commande complète** :\n```\n{full_command}"
