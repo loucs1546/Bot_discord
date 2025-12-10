@@ -4,7 +4,23 @@ from discord.ext import commands
 import core_config as config
 from utils.logging import send_log_to
 from datetime import datetime, timezone
-import re  # ← Ajoute cette ligne
+import re
+
+# Fonction utilitaire (ou importe-la depuis un module partagé si elle existe ailleurs)
+def est_bavure_raison(raison: str) -> bool:
+    if not raison or raison.strip().lower() in ("", "aucune raison"):
+        return True
+    mots = re.findall(r'\b[a-zA-Z]{2,}\b', raison)
+    if len(mots) < 2:
+        return True
+    voyelles = "aeiouy"
+    valid_count = 0
+    for mot in mots:
+        if any(c.lower() in voyelles for c in mot):
+            valid_count += 1
+            if valid_count >= 2:
+                return False
+    return True
 
 class LoggingCog(commands.Cog):
     def __init__(self, bot):
@@ -163,7 +179,6 @@ class LoggingCog(commands.Cog):
             embed.set_thumbnail(url=after.display_avatar.url)
             await send_log_to(self.bot, "profile", embed)
 
-
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         if member.guild.id != config.GUILD_ID:
@@ -248,33 +263,30 @@ class LoggingCog(commands.Cog):
         if not interaction.guild or interaction.guild.id != config.GUILD_ID or interaction.type != discord.InteractionType.application_command:
             return
 
+        if interaction.command is None:
+            return  # Commande inconnue → ignorer
+
         args = {}
         if interaction.data.get("options"):
             for opt in interaction.data["options"]:
                 args[opt["name"]] = opt.get("value")
 
-        if interaction.command is not None:
-            full_command = f"/{interaction.command.name}"
-        else:
-            full_command = "commande inconnue"
+        full_command = f"/{interaction.command.name}"
 
-        reason = args.get("raison", "")
-
-        # === LOG DES SANCTIONS SANS RAISON (dans 'bavures') ===
-        if interaction.command is None:
-            return  # Ignore les interactions avec des commandes inconnues
-        if interaction.command and interaction.command.name in ("kick", "ban", "warn"):
+        # === DÉTECTION DE BAVURE SUR /kick, /ban, /warn ===
+        if interaction.command.name in ("kick", "ban", "warn"):
+            raison = args.get("raison", "Aucune raison")
+            if est_bavure_raison(raison):
                 embed = discord.Embed(
-                title="⚠️ Bavure détectée",
-                description=f"**Commande** : {full_command}\n**Auteur** : {interaction.user.mention}\n**Cible** : {args.get('pseudo', 'Inconnu')}\n**Raison** : *Aucune*",
-                color=0xff6600,
-                timestamp=discord.utils.utcnow()
-            )
-            if est_bavure_raison(before, after):
-                embed = discord.Embed(...)
-                await send_log_to(self.bot, "bavures", embed)  # ← 4 ou 8 espaces, selon le contexte
+                    title="⚠️ Bavure détectée",
+                    description=f"**Commande** : {full_command}\n**Auteur** : {interaction.user.mention}\n**Cible** : {args.get('pseudo', 'Inconnu')}\n**Raison** : *{raison}*",
+                    color=0xff6600,
+                    timestamp=discord.utils.utcnow()
+                )
+                await send_log_to(self.bot, "bavures", embed)
+                # Ne pas bloquer la commande ici (la vérif est déjà faite dans les commandes)
 
-        # === LOG NORMAL DANS 'commands' ===
+        # === LOG NORMAL ===
         desc = f"**Utilisateur** : {interaction.user.mention}\n**Commande complète** :\n```\n{full_command}"
         for name, value in args.items():
             desc += f" --{name} {value}"
@@ -287,7 +299,7 @@ class LoggingCog(commands.Cog):
             timestamp=discord.utils.utcnow()
         )
         await send_log_to(self.bot, "commands", embed)
-    
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         welcome_ch = self.bot.get_channel(config.CONFIG.get("channels", {}).get("welcome"))
@@ -296,11 +308,11 @@ class LoggingCog(commands.Cog):
                 title="👋 Bienvenue sur le serveur !",
                 description=f"Bonjour {member.mention},\nBienvenue sur **{member.guild.name}** !\n\nLis le règlement et amuse-toi bien !",
                 color=0x2ecc71,
-                timestamp=datetime.now(timezone.utc) 
+                timestamp=datetime.now(timezone.utc)
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             await welcome_ch.send(embed=embed)
-    
+
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         leave_ch = self.bot.get_channel(config.CONFIG.get("channels", {}).get("leave"))
@@ -309,7 +321,7 @@ class LoggingCog(commands.Cog):
                 title="👋 Au revoir...",
                 description=f"**{member}** a quitté le serveur.\nNous espérons te revoir bientôt !",
                 color=0xe74c3c,
-                timestamp=datetime.now(timezone.utc) 
+                timestamp=datetime.now(timezone.utc)
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             await leave_ch.send(embed=embed)
