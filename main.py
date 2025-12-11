@@ -1887,6 +1887,31 @@ async def anti_hack(interaction: discord.Interaction, actif: bool):
     config.CONFIG["security"]["anti_hack"] = actif
     await interaction.response.send_message(f"✅ Anti-hack {'activé' if actif else 'désactivé'}.", ephemeral=False)
 
+@bot.tree.command(name="content-mess", description="Active/désactive la détection de contenu suspect dans ce salon")
+@discord.app_commands.describe(actif="True = activer, False = désactiver")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def content_mess(interaction: discord.Interaction, actif: bool):
+    config.CONFIG.setdefault("content_filter", {}).setdefault("disabled_channels", [])
+    disabled = config.CONFIG["content_filter"]["disabled_channels"]
+
+    if actif:
+        # Réactiver → retirer le salon de la liste
+        if interaction.channel.id in disabled:
+            disabled.remove(interaction.channel.id)
+        await interaction.response.send_message("✅ Détection de contenu **activée** dans ce salon.", ephemeral=True)
+    else:
+        # Désactiver → ajouter le salon à la liste
+        if interaction.channel.id not in disabled:
+            disabled.append(interaction.channel.id)
+        await interaction.response.send_message("⚠️ Détection de contenu **désactivée** dans ce salon.", ephemeral=True)
+
+    # Sauvegarde
+    save_ch = discord.utils.get(interaction.guild.text_channels, name="📁-sauvegarde")
+    if save_ch:
+        import json, io
+        data_str = json.dumps(config.CONFIG, indent=4, ensure_ascii=False)
+        file = discord.File(io.BytesIO(data_str.encode()), filename="POUR_TOI.txt")
+        await save_ch.send("💾 **Mise à jour filtre contenu**", file=file)
 
 # Commande utilitaire pour forcer la synchronisation des commandes sur le serveur courant
 @bot.tree.command(name="sync", description="(Admin) Synchronise les commandes pour ce serveur")
