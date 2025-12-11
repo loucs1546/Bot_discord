@@ -7,6 +7,19 @@ from utils.logging import send_log_to
 class ContentFilterCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Liste des mots interdits (à remplacer par ta liste réelle)
+        self.bad_words = [
+            "merde", "pute", "connard", "salope", "enculé", "nique", "bite", "chienne"
+        ]
+        # Domaines autorisés (à ajuster)
+        self.allowed_domains = [
+            "discord.com",
+            "discord.gg",
+            "youtube.com",
+            "youtu.be",
+            "tenor.com",
+            "giphy.com"
+        ]
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -19,33 +32,33 @@ class ContentFilterCog(commands.Cog):
         ):
             return
 
-        # ✅ 1. Si le salon est désactivé → ignorer
+        # ✅ Désactiver si le salon est dans la liste
         disabled = config.CONFIG.get("content_filter", {}).get("disabled_channels", [])
         if message.channel.id in disabled:
             return
 
-        # ✅ 2. Si le message ne contient QUE des émojis (ou rien d'autre) → autoriser
-        #     → Supprime les émojis Unicode et les émojis personnalisés <a:...:123>
-        cleaned = re.sub(r'<a?:\w+:\d+>', '', message.content)  # émojis personnalisés
-        cleaned = re.sub(r'[\U00010000-\U0010ffff\U00002600-\U000026ff]', '', cleaned)  # émojis Unicode
-        cleaned = re.sub(r'\s+', '', cleaned)  # espaces
-
+        # ✅ Ignorer si le message ne contient QUE des émojis
+        cleaned = re.sub(r'<a?:\w+:\d+>', '', message.content)  # Émojis personnalisés
+        cleaned = re.sub(r'[\U00010000-\U0010ffff\U00002600-\U000026ff]', '', cleaned)  # Émojis Unicode
+        cleaned = re.sub(r'\s+', '', cleaned)
         if not cleaned:
-            return  # ✅ Seulement des émojis → OK
+            return
 
-        # ✅ 3. Vérifier gros mots, liens, etc. (logique existante)
-        # ... (garde ta logique actuelle de détection ici)
-        # Exemple :
-        bad_words = ["merde", "connard", " salope"]  # à remplacer par ta liste
-        if any(word in message.content.lower() for word in bad_words):
-            await self._handle_suspicious_message(message, "Gros mot détecté")
+        # 🚫 Vérifier les gros mots
+        content_lower = message.content.lower()
+        for word in self.bad_words:
+            if word in content_lower:
+                await self._handle_suspicious_message(message, f"Gros mot détecté : `{word}`")
+                return
 
-        # Détecter les liens non autorisés (si tu en as)
+        # 🚫 Vérifier les liens non autorisés
         url_pattern = re.compile(r'https?://[^\s]+')
-        if url_pattern.search(message.content):
-            allowed_domains = ["discord.com", "youtube.com"]  # exemple
-            if not any(domain in message.content for domain in allowed_domains):
-                await self._handle_suspicious_message(message, "Lien non autorisé")
+        urls = url_pattern.findall(message.content)
+        if urls:
+            for url in urls:
+                if not any(domain in url for domain in self.allowed_domains):
+                    await self._handle_suspicious_message(message, f"Lien non autorisé : `{url}`")
+                    return
 
     async def _handle_suspicious_message(self, message, reason: str):
         try:
@@ -62,8 +75,10 @@ class ContentFilterCog(commands.Cog):
         if message.content:
             embed.add_field(name="Contenu", value=message.content[:1000], inline=False)
 
+        # ✅ Envoie le log dans le bon salon
         await send_log_to(self.bot, "content", embed)
 
+        # ✅ Notification temporaire
         try:
             await message.channel.send(
                 f"{message.author.mention}, votre message a été supprimé pour : **{reason}**.",
