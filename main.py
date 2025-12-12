@@ -355,7 +355,7 @@ class RuleAcceptView(discord.ui.View):
             if default_role:
                 await user.add_roles(default_role)
 
-        await interaction.response.send_message("✅ Bienvenue sur le serveur !", ephemeral=False)
+        await interaction.response.send_message("✅ Bienvenue sur le serveur !", ephemeral=True)
 
 @bot.tree.command(name="reach-id", description="Obtenir le pseudo à partir d'une ID utilisateur")
 @check_role_permissions("reach-id")  # ← ton système custom
